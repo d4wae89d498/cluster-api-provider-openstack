@@ -22,15 +22,15 @@ func TestEndpointOverrides_GetEndpoint(t *testing.T) {
 	t.Parallel()
 
 	overrides := &EndpointOverrides{
-		Compute: map[string]map[string]string{
+		Clouds: map[string]map[string]map[string]string{
 			"mycloud": {
-				"RegionOne": "https://nova.example.com/v2.1/",
-				"RegionTwo": "https://nova-r2.example.com/v2.1/",
-			},
-		},
-		Network: map[string]map[string]string{
-			"mycloud": {
-				"RegionOne": "https://neutron.example.com/v2.0/",
+				"RegionOne": {
+					"compute": "https://nova.example.com/v2.1/",
+					"network": "https://neutron.example.com/v2.0/",
+				},
+				"RegionTwo": {
+					"compute": "https://nova-r2.example.com/v2.1/",
+				},
 			},
 		},
 	}

@@ -29,42 +29,37 @@ Keystone service catalog.
 
 ```yaml
 # endpoints.yaml
-<service>:
+clouds:
   <cloudName>:
-    <regionName>: <url>
+    <regionName>:
+      <service>: <url>
 ```
 
-* `<service>` – one of `compute`, `network`, `volume`, `image`, `loadbalancer`.
 * `<cloudName>` – the cloud name as it appears in `clouds.yaml` (and in
   `OpenStackIdentityReference.cloudName`).
 * `<regionName>` – the OpenStack region name.
+* `<service>` – one of `compute`, `network`, `volume`, `image`, `loadbalancer`.
 * `<url>` – the full base URL of the service endpoint.  **Must end with a
   trailing slash (`/`).**
 
-Only the services and cloud/region combinations that you need to override must
-be listed.  Any service without an entry will continue to use the URL discovered
+Only the clouds, regions, and services that you need to override must be
+listed.  Any service without an entry will continue to use the URL discovered
 from the Keystone service catalog.
 
 ## Full example
 
 ```yaml
 # endpoints.yaml
-compute:
+clouds:
   mycloud:
-    RegionOne: https://nova-internal.example.com/v2.1/
-    RegionTwo: https://nova-regiontwo.example.com/v2.1/
-network:
-  mycloud:
-    RegionOne: https://neutron-internal.example.com/v2.0/
-volume:
-  mycloud:
-    RegionOne: https://cinder-internal.example.com/v3/
-image:
-  mycloud:
-    RegionOne: https://glance-internal.example.com/v2/
-loadbalancer:
-  mycloud:
-    RegionOne: https://octavia-internal.example.com/v2.0/
+    RegionOne:
+      compute: https://nova-internal.example.com/v2.1/
+      network: https://neutron-internal.example.com/v2.0/
+      volume: https://cinder-internal.example.com/v3/
+      image: https://glance-internal.example.com/v2/
+      loadbalancer: https://octavia-internal.example.com/v2.0/
+    RegionTwo:
+      compute: https://nova-regiontwo.example.com/v2.1/
 ```
 
 ## Adding the key to an existing Secret

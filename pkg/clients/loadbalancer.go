@@ -67,13 +67,20 @@ type lbClient struct {
 }
 
 // NewLbClient returns a new loadbalancer client.
-func NewLbClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts) (LbClient, error) {
+// An optional endpointURL may be provided to override the service catalog endpoint.
+// If provided, it must end with a trailing slash ('/').
+func NewLbClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (LbClient, error) {
 	loadbalancerClient, err := openstack.NewLoadBalancerV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create load balancer service client: %v", err)
+	}
+
+	// Override the endpoint URL if a custom one was specified.
+	if endpointURL != "" {
+		loadbalancerClient.Endpoint = endpointURL
 	}
 
 	return &lbClient{loadbalancerClient}, nil

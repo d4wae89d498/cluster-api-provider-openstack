@@ -651,7 +651,7 @@ func GetOpenStackServerWithIP(e2eCtx *E2EContext, id string, openStackCluster *i
 		return srvExtWithIP, nil
 	}
 
-	computeClient, err := clients.NewComputeClient(providerClient, clientOpts)
+	computeClient, err := clients.NewComputeClient(providerClient, clientOpts, "")
 	if err != nil {
 		return srvExtWithIP, fmt.Errorf("unable to create compute client: %w", err)
 	}
@@ -1020,7 +1020,7 @@ func GetOpenStackServerConsoleLog(e2eCtx *E2EContext, id string) (string, error)
 		return "", nil
 	}
 
-	computeClient, err := clients.NewComputeClient(providerClient, clientOpts)
+	computeClient, err := clients.NewComputeClient(providerClient, clientOpts, "")
 	if err != nil {
 		return "", fmt.Errorf("unable to create compute client: %w", err)
 	}

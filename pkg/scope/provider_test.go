@@ -195,12 +195,11 @@ func TestGetCloudFromSecret_WithEndpointOverrides(t *testing.T) {
 	ctx := context.Background()
 
 	endpointsYAML := []byte(`
-compute:
+clouds:
   mycloud:
-    RegionOne: https://nova-custom.example.com/v2.1/
-network:
-  mycloud:
-    RegionOne: https://neutron-custom.example.com/v2.0/
+    RegionOne:
+      compute: https://nova-custom.example.com/v2.1/
+      network: https://neutron-custom.example.com/v2.0/
 `)
 
 	secretName := "os-cred-endpoints" //nolint:gosec
@@ -240,7 +239,7 @@ func TestGetCloudFromSecret_InvalidEndpointOverrides(t *testing.T) {
 	secretName := "os-cred-bad-endpoints" //nolint:gosec
 	secret := createTestSecret(secretName, map[string][]byte{
 		CloudsSecretKey:    testCloudsYAML,
-		EndpointsSecretKey: []byte("compute: [not a map]"),
+		EndpointsSecretKey: []byte("clouds: [not a map]"),
 	})
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()

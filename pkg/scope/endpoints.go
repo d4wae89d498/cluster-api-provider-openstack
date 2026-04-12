@@ -26,51 +26,30 @@ const EndpointsSecretKey = "endpoints.yaml"
 //
 // Structure:
 //
-//	<service>:
+//	clouds:
 //	  <cloudName>:
-//	    <regionName>: <url>
+//	    <regionName>:
+//	      <service>: <url>
 //
 // Supported services: compute, network, volume, image, loadbalancer.
 // All endpoint URLs MUST end with a trailing slash ('/').
 //
 // Example:
 //
-//	compute:
+//	clouds:
 //	  mycloud:
-//	    RegionOne: https://nova-custom.example.com/v2.1/
-//	    RegionTwo: https://nova-regiontwo.example.com/v2.1/
-//	network:
-//	  mycloud:
-//	    RegionOne: https://neutron-custom.example.com/v2.0/
-//	volume:
-//	  mycloud:
-//	    RegionOne: https://cinder-custom.example.com/v3/
-//	image:
-//	  mycloud:
-//	    RegionOne: https://glance-custom.example.com/v2/
-//	loadbalancer:
-//	  mycloud:
-//	    RegionOne: https://octavia-custom.example.com/v2.0/
+//	    RegionOne:
+//	      compute: https://nova-custom.example.com/v2.1/
+//	      network: https://neutron-custom.example.com/v2.0/
+//	    RegionTwo:
+//	      compute: https://nova-regiontwo.example.com/v2.1/
 type EndpointOverrides struct {
-	// Compute holds endpoint overrides for the Nova (compute) service.
+	// Clouds holds per-cloud, per-region endpoint overrides.
+	// The outer key is the cloud name (as it appears in clouds.yaml), the
+	// middle key is the region name, and the inner key is the service name
+	// (one of: compute, network, volume, image, loadbalancer).
 	// +optional
-	Compute map[string]map[string]string `json:"compute,omitempty" yaml:"compute,omitempty"`
-
-	// Network holds endpoint overrides for the Neutron (network) service.
-	// +optional
-	Network map[string]map[string]string `json:"network,omitempty" yaml:"network,omitempty"`
-
-	// Volume holds endpoint overrides for the Cinder (block storage) service.
-	// +optional
-	Volume map[string]map[string]string `json:"volume,omitempty" yaml:"volume,omitempty"`
-
-	// Image holds endpoint overrides for the Glance (image) service.
-	// +optional
-	Image map[string]map[string]string `json:"image,omitempty" yaml:"image,omitempty"`
-
-	// LoadBalancer holds endpoint overrides for the Octavia (load balancer) service.
-	// +optional
-	LoadBalancer map[string]map[string]string `json:"loadbalancer,omitempty" yaml:"loadbalancer,omitempty"`
+	Clouds map[string]map[string]map[string]string `json:"clouds,omitempty" yaml:"clouds,omitempty"`
 }
 
 // GetEndpoint returns the custom endpoint URL for the given service, cloud name,
@@ -80,24 +59,13 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	if e == nil {
 		return ""
 	}
-	var byCloud map[string]map[string]string
-	switch service {
-	case "compute":
-		byCloud = e.Compute
-	case "network":
-		byCloud = e.Network
-	case "volume":
-		byCloud = e.Volume
-	case "image":
-		byCloud = e.Image
-	case "loadbalancer":
-		byCloud = e.LoadBalancer
-	default:
-		return ""
-	}
-	byRegion, ok := byCloud[cloudName]
+	byRegion, ok := e.Clouds[cloudName]
 	if !ok {
 		return ""
 	}
-	return byRegion[regionName]
+	byService, ok := byRegion[regionName]
+	if !ok {
+		return ""
+	}
+	return byService[service]
 }

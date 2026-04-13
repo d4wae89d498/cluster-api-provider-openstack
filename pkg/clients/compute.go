@@ -28,6 +28,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servergroups"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 	openstackutil "sigs.k8s.io/cluster-api-provider-openstack/pkg/utils/openstack"
@@ -97,11 +98,19 @@ func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClient
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
 		}
+		klog.V(0).Infof("NewComputeClient: catalog failed, using override endpoint=%q", endpointURL)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create compute service client: %v", err)
 	} else if endpointURL != "" {
+		klog.V(0).Infof("NewComputeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
+			compute.Endpoint, compute.ResourceBase, endpointURL)
 		// Catalog succeeded; override the endpoint.
+		// Also clear ResourceBase so ResourceBaseURL() falls back to the new Endpoint.
 		compute.Endpoint = endpointURL
+		compute.ResourceBase = ""
+	} else {
+		klog.V(0).Infof("NewComputeClient: using catalog endpoint=%q resourceBase=%q",
+			compute.Endpoint, compute.ResourceBase)
 	}
 
 	// Find the minimum and maximum versions supported by the server
@@ -109,6 +118,9 @@ func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClient
 	if err != nil {
 		return nil, fmt.Errorf("unable to verify compatible server version: %w", err)
 	}
+
+	klog.V(0).Infof("NewComputeClient: server microversions min=%q max=%q, CAPO requires=%q",
+		serviceMin, serviceMax, MinimumNovaMicroversion)
 
 	supported, err := openstackutil.MicroversionSupported(MinimumNovaMicroversion, serviceMin, serviceMax)
 	if err != nil {
@@ -134,17 +146,61 @@ func (c computeClient) ListAvailabilityZones() ([]availabilityzones.Availability
 }
 
 func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
-	mc := metrics.NewMetricPrometheusContext("flavor", "list")
-	allPages, err := flavors.ListDetail(c.client, &flavors.ListOpts{
-		// PublicAccess (is_public=true) returns public flavors AND
-		// private flavors associated with the current project.
-		// Without this, the API default omits the is_public parameter
-		// which only returns public flavors, causing lookups to fail
-		// for project-private flavors.
-		// NOTE: Do NOT use AllAccess here — it requires admin privileges
-		// and returns an empty list for non-admin users.
+	flavorListURL := c.client.ServiceURL("flavors", "detail")
+	klog.V(0).Infof("ListFlavors: endpoint=%q resourceBase=%q flavorListURL=%q microversion=%q",
+		c.client.Endpoint, c.client.ResourceBase, flavorListURL, c.client.Microversion)
+
+	// Strategy 1: list without any is_public filter (server default).
+	// On most deployments the default returns public flavors plus private
+	// flavors visible to the current project.
+	result, err := c.listFlavorsWithOpts(nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > 0 {
+		klog.V(0).Infof("ListFlavors: strategy=default returned %d flavor(s)", len(result))
+		return result, nil
+	}
+
+	// Strategy 2: explicitly request is_public=true (PublicAccess).
+	// On some deployments this behaves differently from the default.
+	klog.V(0).Info("ListFlavors: default filter returned 0 flavors, retrying with is_public=true")
+	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
 		AccessType: flavors.PublicAccess,
-	}).AllPages(context.TODO())
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > 0 {
+		klog.V(0).Infof("ListFlavors: strategy=PublicAccess returned %d flavor(s)", len(result))
+		return result, nil
+	}
+
+	// Strategy 3: try AllAccess (is_public=None) which is admin-only but
+	// may work if the service account has the admin role.
+	klog.V(0).Info("ListFlavors: PublicAccess returned 0 flavors, retrying with is_public=None (admin)")
+	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
+		AccessType: flavors.AllAccess,
+	})
+	if err != nil {
+		klog.V(0).Infof("ListFlavors: AllAccess failed (likely non-admin): %v", err)
+		// Not fatal — return the empty list from the previous strategy.
+		return []flavors.Flavor{}, nil
+	}
+
+	klog.V(0).Infof("ListFlavors: strategy=AllAccess returned %d flavor(s)", len(result))
+	return result, nil
+}
+
+// listFlavorsWithOpts performs a single flavors.ListDetail call with the
+// given options and returns the extracted flavors.
+func (c computeClient) listFlavorsWithOpts(opts *flavors.ListOpts) ([]flavors.Flavor, error) {
+	mc := metrics.NewMetricPrometheusContext("flavor", "list")
+	var listOpts flavors.ListOptsBuilder
+	if opts != nil {
+		listOpts = opts
+	}
+	allPages, err := flavors.ListDetail(c.client, listOpts).AllPages(context.TODO())
 	if mc.ObserveRequest(err) != nil {
 		return nil, err
 	}

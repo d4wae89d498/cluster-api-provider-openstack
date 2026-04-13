@@ -16,6 +16,8 @@ limitations under the License.
 
 package scope
 
+import "strings"
+
 // EndpointsSecretKey is the key in the credentials secret that optionally contains
 // per-service endpoint overrides.  The value must be a YAML-encoded EndpointOverrides.
 const EndpointsSecretKey = "endpoints.yaml"
@@ -76,7 +78,7 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	// 1. Exact match on region
 	if byService, ok := byRegion[regionName]; ok {
 		if url := byService[service]; url != "" {
-			return url
+			return ensureTrailingSlash(url)
 		}
 	}
 
@@ -84,7 +86,7 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	if regionName != "" {
 		if byService, ok := byRegion[""]; ok {
 			if url := byService[service]; url != "" {
-				return url
+				return ensureTrailingSlash(url)
 			}
 		}
 	}
@@ -93,12 +95,22 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	if len(byRegion) == 1 {
 		for _, byService := range byRegion {
 			if url := byService[service]; url != "" {
-				return url
+				return ensureTrailingSlash(url)
 			}
 		}
 	}
 
 	return ""
+}
+
+// ensureTrailingSlash appends a "/" to the URL if it doesn't already end with one.
+// Gophercloud's ServiceClient.ServiceURL() concatenates ResourceBaseURL() with
+// path segments without adding a separator, so the base URL MUST end with "/".
+func ensureTrailingSlash(url string) string {
+	if !strings.HasSuffix(url, "/") {
+		return url + "/"
+	}
+	return url
 }
 
 // AvailableRegions returns the region keys configured for a given cloud,

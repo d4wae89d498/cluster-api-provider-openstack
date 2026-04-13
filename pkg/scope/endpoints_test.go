@@ -172,3 +172,54 @@ func TestEndpointOverrides_AvailableRegions(t *testing.T) {
 		t.Errorf("expected nil from nil receiver, got %v", got)
 	}
 }
+
+// TestEndpointOverrides_GetEndpoint_TrailingSlash verifies that GetEndpoint
+// always returns a URL ending with "/" even when the configured value does not.
+// This is critical because gophercloud's ServiceClient.ServiceURL() concatenates
+// ResourceBaseURL() + path without any separator.
+func TestEndpointOverrides_GetEndpoint_TrailingSlash(t *testing.T) {
+	t.Parallel()
+
+	overrides := &EndpointOverrides{
+		Clouds: map[string]map[string]map[string]string{
+			"mycloud": {
+				"RegionOne": {
+					"compute": "https://nova.example.com/v2.1",   // no trailing slash
+					"network": "https://neutron.example.com/v2.0", // no trailing slash
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name    string
+		service string
+		want    string
+	}{
+		{"compute without trailing slash gets one added", "compute", "https://nova.example.com/v2.1/"},
+		{"network without trailing slash gets one added", "network", "https://neutron.example.com/v2.0/"},
+	}
+
+	for _, tc := range cases {
+		got := overrides.GetEndpoint(tc.service, "mycloud", "RegionOne")
+		if got != tc.want {
+			t.Errorf("%s: GetEndpoint(%q, mycloud, RegionOne) = %q, want %q", tc.name, tc.service, got, tc.want)
+		}
+	}
+
+	// URLs that already have trailing slash should not get a double slash
+	overridesWithSlash := &EndpointOverrides{
+		Clouds: map[string]map[string]map[string]string{
+			"mycloud": {
+				"RegionOne": {
+					"compute": "https://nova.example.com/v2.1/",
+				},
+			},
+		},
+	}
+
+	got := overridesWithSlash.GetEndpoint("compute", "mycloud", "RegionOne")
+	if got != "https://nova.example.com/v2.1/" {
+		t.Errorf("URL with existing trailing slash was modified: got %q", got)
+	}
+}

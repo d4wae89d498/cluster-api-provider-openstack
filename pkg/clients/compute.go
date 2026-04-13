@@ -81,13 +81,20 @@ type computeClient struct {
 }
 
 // NewComputeClient returns a new compute client.
-func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts) (ComputeClient, error) {
+// An optional endpointURL may be provided to override the service catalog endpoint.
+// If provided, it must end with a trailing slash ('/').
+func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ComputeClient, error) {
 	compute, err := openstack.NewComputeV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create compute service client: %v", err)
+	}
+
+	// Override the endpoint URL if a custom one was specified.
+	if endpointURL != "" {
+		compute.Endpoint = endpointURL
 	}
 
 	// Find the minimum and maximum versions supported by the server

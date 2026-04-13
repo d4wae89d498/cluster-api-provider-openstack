@@ -24,6 +24,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 )
@@ -52,14 +53,20 @@ func NewVolumeClient(providerClient *gophercloud.ProviderClient, providerClientO
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
 		}
+		klog.V(4).Infof("NewVolumeClient: catalog failed, using override endpoint=%q", endpointURL)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create volume service client: %v", err)
 	} else if endpointURL != "" {
+		klog.V(4).Infof("NewVolumeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
+			volume.Endpoint, volume.ResourceBase, endpointURL)
 		// Override both Endpoint and ResourceBase for safety.
 		// NewBlockStorageV3 does not currently set ResourceBase, but
 		// clearing it ensures forward-compatibility if that changes.
 		volume.Endpoint = endpointURL
 		volume.ResourceBase = ""
+	} else {
+		klog.V(4).Infof("NewVolumeClient: using catalog endpoint=%q resourceBase=%q",
+			volume.Endpoint, volume.ResourceBase)
 	}
 
 	return &volumeClient{volume}, nil

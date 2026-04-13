@@ -33,6 +33,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 )
@@ -112,9 +113,12 @@ func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClient
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
 		}
+		klog.V(4).Infof("NewNetworkClient: catalog failed, using override endpoint=%q", endpointURL)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create networking service providerClient: %v", err)
 	} else if endpointURL != "" {
+		klog.V(4).Infof("NewNetworkClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
+			serviceClient.Endpoint, serviceClient.ResourceBase, endpointURL)
 		// Override both Endpoint and ResourceBase.  NewNetworkV2 sets
 		// ResourceBase to Endpoint+"v2.0/", so if we only override
 		// Endpoint the actual API calls still use the old catalog URL
@@ -122,6 +126,9 @@ func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClient
 		// ResourceBaseURL() to fall back to the new Endpoint.
 		serviceClient.Endpoint = endpointURL
 		serviceClient.ResourceBase = ""
+	} else {
+		klog.V(4).Infof("NewNetworkClient: using catalog endpoint=%q resourceBase=%q",
+			serviceClient.Endpoint, serviceClient.ResourceBase)
 	}
 
 	return networkClient{serviceClient}, nil

@@ -30,6 +30,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/providers"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 	capoerrors "sigs.k8s.io/cluster-api-provider-openstack/pkg/utils/errors"
@@ -81,15 +82,21 @@ func NewLbClient(providerClient *gophercloud.ProviderClient, providerClientOpts 
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
 		}
+		klog.V(4).Infof("NewLbClient: catalog failed, using override endpoint=%q", endpointURL)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create load balancer service client: %v", err)
 	} else if endpointURL != "" {
+		klog.V(4).Infof("NewLbClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
+			loadbalancerClient.Endpoint, loadbalancerClient.ResourceBase, endpointURL)
 		// Override both Endpoint and ResourceBase.  NewLoadBalancerV2
 		// sets ResourceBase to Endpoint+"v2.0/", so if we only
 		// override Endpoint the actual API calls still use the old
 		// catalog URL via ResourceBase.
 		loadbalancerClient.Endpoint = endpointURL
 		loadbalancerClient.ResourceBase = ""
+	} else {
+		klog.V(4).Infof("NewLbClient: using catalog endpoint=%q resourceBase=%q",
+			loadbalancerClient.Endpoint, loadbalancerClient.ResourceBase)
 	}
 
 	return &lbClient{loadbalancerClient}, nil

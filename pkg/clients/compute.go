@@ -136,11 +136,14 @@ func (c computeClient) ListAvailabilityZones() ([]availabilityzones.Availability
 func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 	mc := metrics.NewMetricPrometheusContext("flavor", "list")
 	allPages, err := flavors.ListDetail(c.client, &flavors.ListOpts{
-		// AllAccess returns both public and private (project-specific)
-		// flavors.  Without this the API only returns public flavors,
-		// causing lookups to fail for private flavors like "m1.large"
-		// that may be restricted to certain projects.
-		AccessType: flavors.AllAccess,
+		// PublicAccess (is_public=true) returns public flavors AND
+		// private flavors associated with the current project.
+		// Without this, the API default omits the is_public parameter
+		// which only returns public flavors, causing lookups to fail
+		// for project-private flavors.
+		// NOTE: Do NOT use AllAccess here — it requires admin privileges
+		// and returns an empty list for non-admin users.
+		AccessType: flavors.PublicAccess,
 	}).AllPages(context.TODO())
 	if mc.ObserveRequest(err) != nil {
 		return nil, err

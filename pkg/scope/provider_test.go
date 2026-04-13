@@ -90,6 +90,11 @@ func TestGetCloudFromSecret_SuccessWithCACert(t *testing.T) {
 	if len(gotCACert) == 0 {
 		t.Fatalf("expected non-empty caCert")
 	}
+	// cloud.Cloud must be populated from the map key so that endpoint-override
+	// lookups (which key on cloudName) work with standard clouds.yaml files.
+	if cloud.Cloud != testCloudName {
+		t.Fatalf("expected cloud.Cloud %q, got %q", testCloudName, cloud.Cloud)
+	}
 }
 
 // TestGetCloudFromSecret_SuccessWithoutCACert tests successful cloud retrieval when CA certificate is not present.

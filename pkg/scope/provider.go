@@ -365,11 +365,20 @@ func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNam
 
 	// get caCert
 	caCert, ok := secret.Data[CASecretKey]
+
+	// clouds.Clouds[cloudName] returns a Cloud struct whose Cloud field is not
+	// automatically populated from the YAML map key.  Populate it explicitly so
+	// that endpoint-override lookups (which key on cloud.Cloud) work correctly
+	// with standard clouds.yaml files that do not include an explicit
+	// "cloud: <name>" line inside each cloud entry.
+	cloud := clouds.Clouds[cloudName]
+	cloud.Cloud = cloudName
+
 	if !ok {
-		return clouds.Clouds[cloudName], nil, endpointOverrides, nil
+		return cloud, nil, endpointOverrides, nil
 	}
 
-	return clouds.Clouds[cloudName], caCert, endpointOverrides, nil
+	return cloud, caCert, endpointOverrides, nil
 }
 
 // getProjectIDFromAuthResult handles different auth mechanisms to retrieve the

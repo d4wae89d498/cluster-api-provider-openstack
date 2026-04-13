@@ -83,34 +83,14 @@ type computeClient struct {
 
 // NewComputeClient returns a new compute client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
-// If provided, it must end with a trailing slash ('/').
-// When an endpointURL is provided and the service catalog lookup fails, the
-// client is created directly with the override URL, bypassing the catalog.
 func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ComputeClient, error) {
 	compute, err := openstack.NewComputeV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil && endpointURL != "" {
-		// Service catalog lookup failed, but we have an explicit endpoint
-		// override — create the service client manually.
-		compute = &gophercloud.ServiceClient{
-			ProviderClient: providerClient,
-			Endpoint:       endpointURL,
-		}
-		klog.V(4).Infof("NewComputeClient: catalog failed, using override endpoint=%q", endpointURL)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to create compute service client: %v", err)
-	} else if endpointURL != "" {
-		klog.V(4).Infof("NewComputeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
-			compute.Endpoint, compute.ResourceBase, endpointURL)
-		// Catalog succeeded; override the endpoint.
-		// Also clear ResourceBase so ResourceBaseURL() falls back to the new Endpoint.
-		compute.Endpoint = endpointURL
-		compute.ResourceBase = ""
-	} else {
-		klog.V(4).Infof("NewComputeClient: using catalog endpoint=%q resourceBase=%q",
-			compute.Endpoint, compute.ResourceBase)
+	compute, err = ApplyEndpointOverride(compute, err, providerClient, endpointURL, "Compute")
+	if err != nil {
+		return nil, err
 	}
 
 	// Find the minimum and maximum versions supported by the server
@@ -146,10 +126,6 @@ func (c computeClient) ListAvailabilityZones() ([]availabilityzones.Availability
 }
 
 func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
-	flavorListURL := c.client.ServiceURL("flavors", "detail")
-	klog.V(4).Infof("ListFlavors: endpoint=%q resourceBase=%q flavorListURL=%q microversion=%q",
-		c.client.Endpoint, c.client.ResourceBase, flavorListURL, c.client.Microversion)
-
 	// Strategy 1: list without any is_public filter (server default).
 	// On most deployments the default returns public flavors plus private
 	// flavors visible to the current project.
@@ -158,13 +134,11 @@ func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 		return nil, err
 	}
 	if len(result) > 0 {
-		klog.V(4).Infof("ListFlavors: strategy=default returned %d flavor(s)", len(result))
 		return result, nil
 	}
 
 	// Strategy 2: explicitly request is_public=true (PublicAccess).
 	// On some deployments this behaves differently from the default.
-	klog.V(4).Info("ListFlavors: default filter returned 0 flavors, retrying with is_public=true")
 	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
 		AccessType: flavors.PublicAccess,
 	})
@@ -172,23 +146,19 @@ func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 		return nil, err
 	}
 	if len(result) > 0 {
-		klog.V(4).Infof("ListFlavors: strategy=PublicAccess returned %d flavor(s)", len(result))
 		return result, nil
 	}
 
 	// Strategy 3: try AllAccess (is_public=None) which is admin-only but
 	// may work if the service account has the admin role.
-	klog.V(4).Info("ListFlavors: PublicAccess returned 0 flavors, retrying with is_public=None (admin)")
 	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
 		AccessType: flavors.AllAccess,
 	})
 	if err != nil {
-		klog.V(4).Infof("ListFlavors: AllAccess failed (likely non-admin): %v", err)
 		// Not fatal — return the empty list from the previous strategy.
 		return []flavors.Flavor{}, nil
 	}
 
-	klog.V(4).Infof("ListFlavors: strategy=AllAccess returned %d flavor(s)", len(result))
 	return result, nil
 }
 

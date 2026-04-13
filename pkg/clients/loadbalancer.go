@@ -30,7 +30,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/providers"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 	capoerrors "sigs.k8s.io/cluster-api-provider-openstack/pkg/utils/errors"
@@ -69,34 +68,14 @@ type lbClient struct {
 
 // NewLbClient returns a new loadbalancer client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
-// If provided, it must end with a trailing slash ('/').
-// When an endpointURL is provided and the service catalog lookup fails, the
-// client is created directly with the override URL, bypassing the catalog.
 func NewLbClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (LbClient, error) {
 	loadbalancerClient, err := openstack.NewLoadBalancerV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil && endpointURL != "" {
-		loadbalancerClient = &gophercloud.ServiceClient{
-			ProviderClient: providerClient,
-			Endpoint:       endpointURL,
-		}
-		klog.V(4).Infof("NewLbClient: catalog failed, using override endpoint=%q", endpointURL)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to create load balancer service client: %v", err)
-	} else if endpointURL != "" {
-		klog.V(4).Infof("NewLbClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
-			loadbalancerClient.Endpoint, loadbalancerClient.ResourceBase, endpointURL)
-		// Override both Endpoint and ResourceBase.  NewLoadBalancerV2
-		// sets ResourceBase to Endpoint+"v2.0/", so if we only
-		// override Endpoint the actual API calls still use the old
-		// catalog URL via ResourceBase.
-		loadbalancerClient.Endpoint = endpointURL
-		loadbalancerClient.ResourceBase = ""
-	} else {
-		klog.V(4).Infof("NewLbClient: using catalog endpoint=%q resourceBase=%q",
-			loadbalancerClient.Endpoint, loadbalancerClient.ResourceBase)
+	loadbalancerClient, err = ApplyEndpointOverride(loadbalancerClient, err, providerClient, endpointURL, "LoadBalancer")
+	if err != nil {
+		return nil, err
 	}
 
 	return &lbClient{loadbalancerClient}, nil

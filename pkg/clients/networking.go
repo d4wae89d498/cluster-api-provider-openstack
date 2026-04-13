@@ -18,7 +18,6 @@ package clients
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack"
@@ -33,7 +32,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 )
@@ -100,35 +98,14 @@ type networkClient struct {
 
 // NewNetworkClient returns an instance of the networking service.
 // An optional endpointURL may be provided to override the service catalog endpoint.
-// If provided, it must end with a trailing slash ('/').
-// When an endpointURL is provided and the service catalog lookup fails, the
-// client is created directly with the override URL, bypassing the catalog.
 func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (NetworkClient, error) {
 	serviceClient, err := openstack.NewNetworkV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil && endpointURL != "" {
-		serviceClient = &gophercloud.ServiceClient{
-			ProviderClient: providerClient,
-			Endpoint:       endpointURL,
-		}
-		klog.V(4).Infof("NewNetworkClient: catalog failed, using override endpoint=%q", endpointURL)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to create networking service providerClient: %v", err)
-	} else if endpointURL != "" {
-		klog.V(4).Infof("NewNetworkClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
-			serviceClient.Endpoint, serviceClient.ResourceBase, endpointURL)
-		// Override both Endpoint and ResourceBase.  NewNetworkV2 sets
-		// ResourceBase to Endpoint+"v2.0/", so if we only override
-		// Endpoint the actual API calls still use the old catalog URL
-		// via ResourceBase.  Clearing ResourceBase forces
-		// ResourceBaseURL() to fall back to the new Endpoint.
-		serviceClient.Endpoint = endpointURL
-		serviceClient.ResourceBase = ""
-	} else {
-		klog.V(4).Infof("NewNetworkClient: using catalog endpoint=%q resourceBase=%q",
-			serviceClient.Endpoint, serviceClient.ResourceBase)
+	serviceClient, err = ApplyEndpointOverride(serviceClient, err, providerClient, endpointURL, "Network")
+	if err != nil {
+		return nil, err
 	}
 
 	return networkClient{serviceClient}, nil

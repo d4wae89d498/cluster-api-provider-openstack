@@ -18,13 +18,11 @@ package clients
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack"
 	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/volumes"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 )
@@ -40,33 +38,14 @@ type volumeClient struct{ client *gophercloud.ServiceClient }
 
 // NewVolumeClient returns a new cinder client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
-// If provided, it must end with a trailing slash ('/').
-// When an endpointURL is provided and the service catalog lookup fails, the
-// client is created directly with the override URL, bypassing the catalog.
 func NewVolumeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (VolumeClient, error) {
 	volume, err := openstack.NewBlockStorageV3(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil && endpointURL != "" {
-		volume = &gophercloud.ServiceClient{
-			ProviderClient: providerClient,
-			Endpoint:       endpointURL,
-		}
-		klog.V(4).Infof("NewVolumeClient: catalog failed, using override endpoint=%q", endpointURL)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to create volume service client: %v", err)
-	} else if endpointURL != "" {
-		klog.V(4).Infof("NewVolumeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
-			volume.Endpoint, volume.ResourceBase, endpointURL)
-		// Override both Endpoint and ResourceBase for safety.
-		// NewBlockStorageV3 does not currently set ResourceBase, but
-		// clearing it ensures forward-compatibility if that changes.
-		volume.Endpoint = endpointURL
-		volume.ResourceBase = ""
-	} else {
-		klog.V(4).Infof("NewVolumeClient: using catalog endpoint=%q resourceBase=%q",
-			volume.Endpoint, volume.ResourceBase)
+	volume, err = ApplyEndpointOverride(volume, err, providerClient, endpointURL, "Volume")
+	if err != nil {
+		return nil, err
 	}
 
 	return &volumeClient{volume}, nil

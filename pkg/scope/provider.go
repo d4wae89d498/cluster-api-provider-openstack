@@ -242,56 +242,26 @@ func (s *providerScope) ProjectID() string {
 
 func (s *providerScope) NewComputeClient() (clients.ComputeClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("compute", s.cloudName, s.regionName)
-	s.logger.V(4).Info("Resolving compute endpoint",
-		"cloudName", s.cloudName,
-		"regionName", s.regionName,
-		"endpointOverrideURL", endpointURL,
-		"overrideAvailableRegions", s.endpointOverrides.AvailableRegions(s.cloudName),
-	)
 	return clients.NewComputeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewNetworkClient() (clients.NetworkClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("network", s.cloudName, s.regionName)
-	s.logger.V(4).Info("Resolving network endpoint",
-		"cloudName", s.cloudName,
-		"regionName", s.regionName,
-		"endpointOverrideURL", endpointURL,
-		"overrideAvailableRegions", s.endpointOverrides.AvailableRegions(s.cloudName),
-	)
 	return clients.NewNetworkClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewVolumeClient() (clients.VolumeClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("volume", s.cloudName, s.regionName)
-	s.logger.V(4).Info("Resolving volume endpoint",
-		"cloudName", s.cloudName,
-		"regionName", s.regionName,
-		"endpointOverrideURL", endpointURL,
-		"overrideAvailableRegions", s.endpointOverrides.AvailableRegions(s.cloudName),
-	)
 	return clients.NewVolumeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewImageClient() (clients.ImageClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("image", s.cloudName, s.regionName)
-	s.logger.V(4).Info("Resolving image endpoint",
-		"cloudName", s.cloudName,
-		"regionName", s.regionName,
-		"endpointOverrideURL", endpointURL,
-		"overrideAvailableRegions", s.endpointOverrides.AvailableRegions(s.cloudName),
-	)
 	return clients.NewImageClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewLbClient() (clients.LbClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("loadbalancer", s.cloudName, s.regionName)
-	s.logger.V(4).Info("Resolving loadbalancer endpoint",
-		"cloudName", s.cloudName,
-		"regionName", s.regionName,
-		"endpointOverrideURL", endpointURL,
-		"overrideAvailableRegions", s.endpointOverrides.AvailableRegions(s.cloudName),
-	)
 	return clients.NewLbClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 

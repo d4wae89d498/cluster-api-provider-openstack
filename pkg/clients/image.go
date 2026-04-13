@@ -18,7 +18,6 @@ package clients
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -27,7 +26,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/imageimport"
 	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 )
@@ -46,45 +44,21 @@ type imageClient struct{ client *gophercloud.ServiceClient }
 
 // NewImageClient returns a new glance client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
-// If provided, it must end with a trailing slash ('/').
-// When an endpointURL is provided and the service catalog lookup fails, the
-// client is created directly with the override URL, bypassing the catalog.
 func NewImageClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ImageClient, error) {
-	images, err := openstack.NewImageV2(providerClient, gophercloud.EndpointOpts{
+	imagesSC, err := openstack.NewImageV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil && endpointURL != "" {
-		images = &gophercloud.ServiceClient{
-			ProviderClient: providerClient,
-			Endpoint:       endpointURL,
-		}
-		klog.V(4).Infof("NewImageClient: catalog failed, using override endpoint=%q", endpointURL)
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to create image service client: %v", err)
-	} else if endpointURL != "" {
-		klog.V(4).Infof("NewImageClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
-			images.Endpoint, images.ResourceBase, endpointURL)
-		// Override both Endpoint and ResourceBase.  NewImageV2 sets
-		// ResourceBase to Endpoint+"v2/", so if we only override
-		// Endpoint the actual API calls still use the old catalog URL
-		// via ResourceBase.  Clearing ResourceBase forces
-		// ResourceBaseURL() to fall back to the new Endpoint.
-		images.Endpoint = endpointURL
-		images.ResourceBase = ""
-	} else {
-		klog.V(4).Infof("NewImageClient: using catalog endpoint=%q resourceBase=%q",
-			images.Endpoint, images.ResourceBase)
+	imagesSC, err = ApplyEndpointOverride(imagesSC, err, providerClient, endpointURL, "Image")
+	if err != nil {
+		return nil, err
 	}
 
-	return imageClient{images}, nil
+	return imageClient{imagesSC}, nil
 }
 
 func (c imageClient) ListImages(listOpts images.ListOptsBuilder) ([]images.Image, error) {
 	mc := metrics.NewMetricPrometheusContext("image", "list")
-	imageListURL := c.client.ServiceURL("images")
-	klog.V(4).Infof("ListImages: endpoint=%q resourceBase=%q imageListURL=%q",
-		c.client.Endpoint, c.client.ResourceBase, imageListURL)
 	pages, err := images.List(c.client, listOpts).AllPages(context.TODO())
 	if mc.ObserveRequest(err) != nil {
 		return nil, err
@@ -95,9 +69,6 @@ func (c imageClient) ListImages(listOpts images.ListOptsBuilder) ([]images.Image
 func (c imageClient) GetImage(id string) (*images.Image, error) {
 	image := &images.Image{}
 	mc := metrics.NewMetricPrometheusContext("image", "get")
-	getURL := c.client.ServiceURL("images", id)
-	klog.V(4).Infof("GetImage: endpoint=%q resourceBase=%q getURL=%q id=%q",
-		c.client.Endpoint, c.client.ResourceBase, getURL, id)
 	err := images.Get(context.TODO(), c.client, id).ExtractInto(image)
 	if mc.ObserveRequest(err) != nil {
 		return nil, err

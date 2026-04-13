@@ -120,7 +120,7 @@ func (f *providerScopeFactory) NewClientScopeFromObject(ctx context.Context, ctr
 	}
 
 	// Read cloud from the resolved secret using the provided cloudName
-	cloud, caCert, endpointOverrides, err := getCloudFromSecret(ctx, ctrlClient, secretNamespace, secretName, identityRef.CloudName)
+	cloud, caCert, endpointOverrides, err := getCloudFromSecret(ctx, ctrlClient, secretNamespace, secretName, identityRef.CloudName, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (g gophercloudLogger) Printf(format string, args ...interface{}) {
 
 // getCloudFromSecret extract a Cloud from the given namespace:secretName.
 // It also reads the optional "endpoints.yaml" key for per-service endpoint overrides.
-func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNamespace string, secretName string, cloudName string) (clientconfig.Cloud, []byte, *EndpointOverrides, error) {
+func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNamespace string, secretName string, cloudName string, logger logr.Logger) (clientconfig.Cloud, []byte, *EndpointOverrides, error) {
 	emptyCloud := clientconfig.Cloud{}
 
 	if secretName == "" {
@@ -347,10 +347,19 @@ func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNam
 	// Parse optional endpoint overrides.
 	var endpointOverrides *EndpointOverrides
 	if endpointsData, hasEndpoints := secret.Data[EndpointsSecretKey]; hasEndpoints {
+		logger.V(0).Info("Loading endpoint overrides from secret", "secret", secretName, "namespace", secretNamespace, "key", EndpointsSecretKey)
 		var overrides EndpointOverrides
 		if err = yaml.Unmarshal(endpointsData, &overrides); err != nil {
 			return emptyCloud, nil, nil, fmt.Errorf("failed to unmarshal endpoint overrides stored in secret %v (key %v): %v", secretName, EndpointsSecretKey, err)
 		}
+		for cloud, byRegion := range overrides.Clouds {
+			for region, byService := range byRegion {
+				for service, url := range byService {
+					logger.V(0).Info("Endpoint override loaded", "cloud", cloud, "region", region, "service", service, "url", url)
+				}
+			}
+		}
+		logger.V(0).Info("Endpoint overrides secret loaded", "secret", secretName, "namespace", secretNamespace)
 		endpointOverrides = &overrides
 	}
 

@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -79,7 +80,7 @@ func TestGetCloudFromSecret_SuccessWithCACert(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
 	if err != nil {
 		t.Fatalf("getCloudFromSecret returned error: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestGetCloudFromSecret_SuccessWithoutCACert(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
 	if err != nil {
 		t.Fatalf("getCloudFromSecret returned error: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestGetCloudFromSecret_MissingSecret(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).Build()
 
-	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, "missing", testCloudName) //nolint:dogsled
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, "missing", testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for missing secret, got nil")
 	}
@@ -141,7 +142,7 @@ func TestGetCloudFromSecret_MissingCloudsKey(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName) //nolint:dogsled
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for missing clouds.yaml key, got nil")
 	}
@@ -159,7 +160,7 @@ func TestGetCloudFromSecret_EmptyCloudName(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "") //nolint:dogsled
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "", logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error when cloudName is empty, got nil")
 	}
@@ -177,7 +178,7 @@ func TestGetCloudFromSecret_InvalidCloudName(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, ca, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "missing-cloud")
+	cloud, ca, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "missing-cloud", logr.Discard())
 	if err != nil {
 		t.Fatalf("expected no error for unknown cloudName (returned zero-value), got: %v", err)
 	}
@@ -210,7 +211,7 @@ clouds:
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, overrides, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	_, _, overrides, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
 	if err != nil {
 		t.Fatalf("getCloudFromSecret returned error: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestGetCloudFromSecret_InvalidEndpointOverrides(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName) //nolint:dogsled
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for invalid endpoints.yaml, got nil")
 	}

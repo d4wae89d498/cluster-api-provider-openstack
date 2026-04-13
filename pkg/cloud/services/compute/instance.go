@@ -373,26 +373,64 @@ func (s *Service) getImageIDByFilter(filter *infrav1.ImageFilter) (*string, erro
 	listOpts := filterconvert.ImageFilterToListOpts(filter)
 	allImages, err := s.getImageClient().ListImages(listOpts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list images (filter: name=%v, tags=%v): %w", ptrStringVal(filter.Name), filter.Tags, err)
 	}
 
 	switch len(allImages) {
 	case 0:
-		var name string
-		if filter.Name != nil {
-			name = *filter.Name
-		}
-		return nil, fmt.Errorf("no images were found with the given image filter: name=%v, tags=%v", name, filter.Tags)
+		// Log available images to help the user debug the mismatch.
+		s.logAvailableImages(filter)
+		return nil, fmt.Errorf("no images were found with the given image filter: name=%q, tags=%v. Use -v=2 or higher to see available images", ptrStringVal(filter.Name), filter.Tags)
 	case 1:
 		return &allImages[0].ID, nil
 	default:
 		// this should never happen
-		var name string
-		if filter.Name != nil {
-			name = *filter.Name
-		}
-		return nil, fmt.Errorf("too many images were found with the given image filter: name=%v, tags=%v", name, filter.Tags)
+		return nil, fmt.Errorf("too many images (%d) were found with the given image filter: name=%q, tags=%v", len(allImages), ptrStringVal(filter.Name), filter.Tags)
 	}
+}
+
+// logAvailableImages fetches all images without a filter and logs their names
+// at V(2) to help users debug "no images found" errors.
+func (s *Service) logAvailableImages(filter *infrav1.ImageFilter) {
+	// Only incur the cost of a full list when the log level is high enough.
+	logger := s.scope.Logger()
+
+	allImages, err := s.getImageClient().ListImages(nil)
+	if err != nil {
+		logger.V(2).Info("Could not list all images for debugging", "error", err)
+		return
+	}
+
+	if len(allImages) == 0 {
+		logger.V(2).Info("Image service returned 0 images (unfiltered). Check that the endpoint and credentials are correct.")
+		return
+	}
+
+	// Collect up to 50 image names to avoid flooding the log.
+	const maxDisplay = 50
+	names := make([]string, 0, min(len(allImages), maxDisplay))
+	for i, img := range allImages {
+		if i >= maxDisplay {
+			break
+		}
+		names = append(names, fmt.Sprintf("%s (id=%s)", img.Name, img.ID))
+	}
+
+	logger.V(2).Info("Available images (no filter)",
+		"count", len(allImages),
+		"showing", len(names),
+		"images", names,
+		"requestedName", ptrStringVal(filter.Name),
+		"requestedTags", filter.Tags,
+	)
+}
+
+// ptrStringVal safely dereferences a string pointer, returning "" if nil.
+func ptrStringVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (s *Service) getImageIDByReference(ctx context.Context, k8sClient client.Client, namespace string, ref *infrav1.ResourceReference) (*string, error) {

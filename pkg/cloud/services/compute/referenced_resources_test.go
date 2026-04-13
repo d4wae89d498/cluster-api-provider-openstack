@@ -121,6 +121,8 @@ func Test_ResolveServerSpec(t *testing.T) {
 			},
 			expectImageMock: func(m *mock.MockImageClientMockRecorder) {
 				m.ListImages(images.ListOpts{Name: "test-image"}).Return([]images.Image{}, nil)
+				// logAvailableImages makes a second unfiltered call for debugging.
+				m.ListImages(nil).Return([]images.Image{}, nil)
 			},
 			want:    &infrav1alpha1.ResolvedServerSpec{},
 			wantErr: true,

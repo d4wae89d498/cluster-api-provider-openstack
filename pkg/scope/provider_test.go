@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -79,7 +81,7 @@ func TestGetCloudFromSecret_SuccessWithCACert(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, gotCACert, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
 	if err != nil {
 		t.Fatalf("getCloudFromSecret returned error: %v", err)
 	}
@@ -88,6 +90,11 @@ func TestGetCloudFromSecret_SuccessWithCACert(t *testing.T) {
 	}
 	if len(gotCACert) == 0 {
 		t.Fatalf("expected non-empty caCert")
+	}
+	// cloud.Cloud must be populated from the map key so that endpoint-override
+	// lookups (which key on cloudName) work with standard clouds.yaml files.
+	if cloud.Cloud != testCloudName {
+		t.Fatalf("expected cloud.Cloud %q, got %q", testCloudName, cloud.Cloud)
 	}
 }
 
@@ -103,7 +110,7 @@ func TestGetCloudFromSecret_SuccessWithoutCACert(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, gotCACert, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	cloud, gotCACert, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
 	if err != nil {
 		t.Fatalf("getCloudFromSecret returned error: %v", err)
 	}
@@ -122,7 +129,7 @@ func TestGetCloudFromSecret_MissingSecret(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).Build()
 
-	_, _, err := getCloudFromSecret(ctx, c, testNamespace, "missing", testCloudName)
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, "missing", testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for missing secret, got nil")
 	}
@@ -141,7 +148,7 @@ func TestGetCloudFromSecret_MissingCloudsKey(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName)
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for missing clouds.yaml key, got nil")
 	}
@@ -159,7 +166,7 @@ func TestGetCloudFromSecret_EmptyCloudName(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	_, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "")
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "", logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error when cloudName is empty, got nil")
 	}
@@ -177,7 +184,7 @@ func TestGetCloudFromSecret_InvalidCloudName(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
 
-	cloud, ca, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "missing-cloud")
+	cloud, ca, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, "missing-cloud", logr.Discard())
 	if err != nil {
 		t.Fatalf("expected no error for unknown cloudName (returned zero-value), got: %v", err)
 	}
@@ -186,5 +193,107 @@ func TestGetCloudFromSecret_InvalidCloudName(t *testing.T) {
 	}
 	if cloud.RegionName != "" || cloud.AuthInfo != nil {
 		t.Fatalf("expected zero-value cloud for unknown cloudName, got RegionName=%q AuthInfo-nil=%v", cloud.RegionName, cloud.AuthInfo == nil)
+	}
+}
+
+// TestGetCloudFromSecret_WithEndpointOverrides tests that endpoints.yaml is parsed when present.
+func TestGetCloudFromSecret_WithEndpointOverrides(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	endpointsYAML := []byte(`
+clouds:
+  mycloud:
+    RegionOne:
+      compute: https://nova-custom.example.com/v2.1/
+      network: https://neutron-custom.example.com/v2.0/
+`)
+
+	secretName := "os-cred-endpoints" //nolint:gosec
+	secret := createTestSecret(secretName, map[string][]byte{
+		CloudsSecretKey:    testCloudsYAML,
+		EndpointsSecretKey: endpointsYAML,
+	})
+
+	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
+
+	_, _, overrides, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard())
+	if err != nil {
+		t.Fatalf("getCloudFromSecret returned error: %v", err)
+	}
+	if overrides == nil {
+		t.Fatalf("expected non-nil endpoint overrides")
+	}
+	want := "https://nova-custom.example.com/v2.1/"
+	if got := overrides.GetEndpoint("compute", testCloudName, testRegion); got != want {
+		t.Fatalf("compute endpoint: want %q, got %q", want, got)
+	}
+	wantNet := "https://neutron-custom.example.com/v2.0/"
+	if got := overrides.GetEndpoint("network", testCloudName, testRegion); got != wantNet {
+		t.Fatalf("network endpoint: want %q, got %q", wantNet, got)
+	}
+	// Volume was not set; should return empty string.
+	if got := overrides.GetEndpoint("volume", testCloudName, testRegion); got != "" {
+		t.Fatalf("expected empty volume endpoint, got %q", got)
+	}
+}
+
+// TestGetCloudFromSecret_InvalidEndpointOverrides tests that a malformed endpoints.yaml returns an error.
+func TestGetCloudFromSecret_InvalidEndpointOverrides(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	secretName := "os-cred-bad-endpoints" //nolint:gosec
+	secret := createTestSecret(secretName, map[string][]byte{
+		CloudsSecretKey:    testCloudsYAML,
+		EndpointsSecretKey: []byte("clouds: [not a map]"),
+	})
+
+	c := fake.NewClientBuilder().WithScheme(buildCoreScheme(t)).WithObjects(secret).Build()
+
+	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard()) //nolint:dogsled
+	if err == nil {
+		t.Fatalf("expected error for invalid endpoints.yaml, got nil")
+	}
+}
+
+// TestGetScopeCacheKey_DiffersWithAndWithoutOverrides ensures that a scope with
+// endpoint overrides and one without produce different cache keys.  This
+// prevents a cached scope (created before endpoints.yaml was added) from being
+// returned in place of a scope that should apply the overrides.
+func TestGetScopeCacheKey_DiffersWithAndWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	cloud := testClientconfigCloud()
+
+	keyNoOverrides, err := getScopeCacheKey(cloud, nil)
+	if err != nil {
+		t.Fatalf("getScopeCacheKey (no overrides): %v", err)
+	}
+
+	overrides := &EndpointOverrides{
+		Clouds: map[string]map[string]map[string]string{
+			testCloudName: {
+				testRegion: {
+					"compute": "https://nova-custom.example.com/v2.1/",
+				},
+			},
+		},
+	}
+	keyWithOverrides, err := getScopeCacheKey(cloud, overrides)
+	if err != nil {
+		t.Fatalf("getScopeCacheKey (with overrides): %v", err)
+	}
+
+	if keyNoOverrides == keyWithOverrides {
+		t.Errorf("cache keys should differ when endpoint overrides are present, but both are %q", keyNoOverrides)
+	}
+}
+
+// testClientconfigCloud returns a minimal clientconfig.Cloud for use in tests.
+func testClientconfigCloud() clientconfig.Cloud {
+	return clientconfig.Cloud{
+		Cloud:      testCloudName,
+		RegionName: testRegion,
 	}
 }

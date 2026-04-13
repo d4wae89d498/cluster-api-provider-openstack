@@ -18,7 +18,6 @@ package clients
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack"
@@ -98,13 +97,15 @@ type networkClient struct {
 }
 
 // NewNetworkClient returns an instance of the networking service.
-func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts) (NetworkClient, error) {
+// An optional endpointURL may be provided to override the service catalog endpoint.
+func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (NetworkClient, error) {
 	serviceClient, err := openstack.NewNetworkV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
+	serviceClient, err = ApplyEndpointOverride(serviceClient, err, providerClient, endpointURL, "Network")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create networking service providerClient: %v", err)
+		return nil, err
 	}
 
 	return networkClient{serviceClient}, nil

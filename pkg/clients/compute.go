@@ -28,6 +28,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servergroups"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cluster-api-provider-openstack/pkg/metrics"
 	openstackutil "sigs.k8s.io/cluster-api-provider-openstack/pkg/utils/openstack"
@@ -81,13 +82,15 @@ type computeClient struct {
 }
 
 // NewComputeClient returns a new compute client.
-func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts) (ComputeClient, error) {
+// An optional endpointURL may be provided to override the service catalog endpoint.
+func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ComputeClient, error) {
 	compute, err := openstack.NewComputeV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
+	compute, err = ApplyEndpointOverride(compute, err, providerClient, endpointURL, "Compute")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create compute service client: %v", err)
+		return nil, err
 	}
 
 	// Find the minimum and maximum versions supported by the server
@@ -95,6 +98,9 @@ func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClient
 	if err != nil {
 		return nil, fmt.Errorf("unable to verify compatible server version: %w", err)
 	}
+
+	klog.V(4).Infof("NewComputeClient: server microversions min=%q max=%q, CAPO requires=%q",
+		serviceMin, serviceMax, MinimumNovaMicroversion)
 
 	supported, err := openstackutil.MicroversionSupported(MinimumNovaMicroversion, serviceMin, serviceMax)
 	if err != nil {
@@ -120,8 +126,51 @@ func (c computeClient) ListAvailabilityZones() ([]availabilityzones.Availability
 }
 
 func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
+	// Strategy 1: list without any is_public filter (server default).
+	// On most deployments the default returns public flavors plus private
+	// flavors visible to the current project.
+	result, err := c.listFlavorsWithOpts(nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > 0 {
+		return result, nil
+	}
+
+	// Strategy 2: explicitly request is_public=true (PublicAccess).
+	// On some deployments this behaves differently from the default.
+	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
+		AccessType: flavors.PublicAccess,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > 0 {
+		return result, nil
+	}
+
+	// Strategy 3: try AllAccess (is_public=None) which is admin-only but
+	// may work if the service account has the admin role.
+	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
+		AccessType: flavors.AllAccess,
+	})
+	if err != nil {
+		// Not fatal — return the empty list from the previous strategy.
+		return []flavors.Flavor{}, nil
+	}
+
+	return result, nil
+}
+
+// listFlavorsWithOpts performs a single flavors.ListDetail call with the
+// given options and returns the extracted flavors.
+func (c computeClient) listFlavorsWithOpts(opts *flavors.ListOpts) ([]flavors.Flavor, error) {
 	mc := metrics.NewMetricPrometheusContext("flavor", "list")
-	allPages, err := flavors.ListDetail(c.client, &flavors.ListOpts{}).AllPages(context.TODO())
+	var listOpts flavors.ListOptsBuilder
+	if opts != nil {
+		listOpts = opts
+	}
+	allPages, err := flavors.ListDetail(c.client, listOpts).AllPages(context.TODO())
 	if mc.ObserveRequest(err) != nil {
 		return nil, err
 	}

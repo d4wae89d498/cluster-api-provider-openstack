@@ -120,7 +120,7 @@ func (f *providerScopeFactory) NewClientScopeFromObject(ctx context.Context, ctr
 	}
 
 	// Read cloud from the resolved secret using the provided cloudName
-	cloud, caCert, err := getCloudFromSecret(ctx, ctrlClient, secretNamespace, secretName, identityRef.CloudName)
+	cloud, caCert, endpointOverrides, err := getCloudFromSecret(ctx, ctrlClient, secretNamespace, secretName, identityRef.CloudName, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -130,52 +130,96 @@ func (f *providerScopeFactory) NewClientScopeFromObject(ctx context.Context, ctr
 	}
 
 	if f.clientCache == nil {
-		return NewProviderScope(cloud, identityRef.Region, caCert, logger)
+		return NewProviderScope(cloud, identityRef.Region, caCert, endpointOverrides, logger)
 	}
 
-	return NewCachedProviderScope(f.clientCache, cloud, identityRef.Region, caCert, logger)
+	return NewCachedProviderScope(f.clientCache, cloud, identityRef.Region, caCert, endpointOverrides, logger)
 }
 
-func getScopeCacheKey(cloud clientconfig.Cloud) (string, error) {
-	key, err := computeSpewHash(cloud)
+// getScopeCacheKey returns a cache key that uniquely identifies a provider
+// scope.  It hashes both the cloud configuration and the endpoint overrides so
+// that changing endpoints.yaml always produces a new scope (and the cached
+// scope is not returned with stale — or absent — endpoint overrides).
+func getScopeCacheKey(cloud clientconfig.Cloud, endpointOverrides *EndpointOverrides) (string, error) {
+	cloudKey, err := computeSpewHash(cloud)
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("%d", key), nil
+	// Hash the overrides separately; a nil pointer and an empty struct must
+	// produce the same key, so normalise to a concrete value first.
+	var overrideVal EndpointOverrides
+	if endpointOverrides != nil {
+		overrideVal = *endpointOverrides
+	}
+	overrideKey, err := computeSpewHash(overrideVal)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%d-%d", cloudKey, overrideKey), nil
 }
 
 type providerScope struct {
 	providerClient     *gophercloud.ProviderClient
 	providerClientOpts *clientconfig.ClientOpts
 	projectID          string
+	endpointOverrides  *EndpointOverrides
+	cloudName          string
+	regionName         string
+	logger             logr.Logger
 }
 
-func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte, logger logr.Logger) (Scope, error) {
+func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte, endpointOverrides *EndpointOverrides, logger logr.Logger) (Scope, error) {
 	providerClient, clientOpts, projectID, err := NewProviderClient(cloud, regionName, caCert, logger)
 	if err != nil {
 		return nil, err
+	}
+
+	// Determine the effective region for endpoint override lookup.
+	effectiveRegion := regionName
+	if effectiveRegion == "" {
+		effectiveRegion = cloud.RegionName
+	}
+
+	hasOverrides := endpointOverrides != nil && len(endpointOverrides.Clouds) > 0
+	logger.V(4).Info("Creating provider scope",
+		"cloudName", cloud.Cloud,
+		"regionName", effectiveRegion,
+		"endpointOverridesPresent", hasOverrides,
+	)
+	if hasOverrides {
+		logger.V(4).Info("Endpoint overrides: available regions for cloud",
+			"cloudName", cloud.Cloud,
+			"availableRegions", endpointOverrides.AvailableRegions(cloud.Cloud),
+		)
 	}
 
 	return &providerScope{
 		providerClient:     providerClient,
 		providerClientOpts: clientOpts,
 		projectID:          projectID,
+		endpointOverrides:  endpointOverrides,
+		cloudName:          cloud.Cloud,
+		regionName:         effectiveRegion,
+		logger:             logger,
 	}, nil
 }
 
-func NewCachedProviderScope(cache *cache.LRUExpireCache, cloud clientconfig.Cloud, regionName string, caCert []byte, logger logr.Logger) (Scope, error) {
-	key, err := getScopeCacheKey(cloud)
+func NewCachedProviderScope(cache *cache.LRUExpireCache, cloud clientconfig.Cloud, regionName string, caCert []byte, endpointOverrides *EndpointOverrides, logger logr.Logger) (Scope, error) {
+	// The cache key covers both the cloud credentials AND the endpoint overrides
+	// so that adding/changing endpoints.yaml invalidates the cached scope.
+	key, err := getScopeCacheKey(cloud, endpointOverrides)
 	if err != nil {
 		return nil, fmt.Errorf("compute cloud config cache key: %w", err)
 	}
 
 	if scope, found := cache.Get(key); found {
-		logger.V(5).Info("Using scope from cache")
+		logger.V(4).Info("Using scope from cache", "cacheKey", key)
 		return scope.(Scope), nil
 	}
 
-	scope, err := NewProviderScope(cloud, regionName, caCert, logger)
+	scope, err := NewProviderScope(cloud, regionName, caCert, endpointOverrides, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -197,23 +241,28 @@ func (s *providerScope) ProjectID() string {
 }
 
 func (s *providerScope) NewComputeClient() (clients.ComputeClient, error) {
-	return clients.NewComputeClient(s.providerClient, s.providerClientOpts)
+	endpointURL := s.endpointOverrides.GetEndpoint("compute", s.cloudName, s.regionName)
+	return clients.NewComputeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewNetworkClient() (clients.NetworkClient, error) {
-	return clients.NewNetworkClient(s.providerClient, s.providerClientOpts)
+	endpointURL := s.endpointOverrides.GetEndpoint("network", s.cloudName, s.regionName)
+	return clients.NewNetworkClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewVolumeClient() (clients.VolumeClient, error) {
-	return clients.NewVolumeClient(s.providerClient, s.providerClientOpts)
+	endpointURL := s.endpointOverrides.GetEndpoint("volume", s.cloudName, s.regionName)
+	return clients.NewVolumeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewImageClient() (clients.ImageClient, error) {
-	return clients.NewImageClient(s.providerClient, s.providerClientOpts)
+	endpointURL := s.endpointOverrides.GetEndpoint("image", s.cloudName, s.regionName)
+	return clients.NewImageClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewLbClient() (clients.LbClient, error) {
-	return clients.NewLbClient(s.providerClient, s.providerClientOpts)
+	endpointURL := s.endpointOverrides.GetEndpoint("loadbalancer", s.cloudName, s.regionName)
+	return clients.NewLbClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) ExtractToken() (*tokens.Token, error) {
@@ -301,15 +350,16 @@ func (g gophercloudLogger) Printf(format string, args ...interface{}) {
 }
 
 // getCloudFromSecret extract a Cloud from the given namespace:secretName.
-func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNamespace string, secretName string, cloudName string) (clientconfig.Cloud, []byte, error) {
+// It also reads the optional "endpoints.yaml" key for per-service endpoint overrides.
+func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNamespace string, secretName string, cloudName string, logger logr.Logger) (clientconfig.Cloud, []byte, *EndpointOverrides, error) {
 	emptyCloud := clientconfig.Cloud{}
 
 	if secretName == "" {
-		return emptyCloud, nil, nil
+		return emptyCloud, nil, nil, nil
 	}
 
 	if cloudName == "" {
-		return emptyCloud, nil, fmt.Errorf("secret name set to %v but no cloud was specified. Please set cloud_name in your machine spec", secretName)
+		return emptyCloud, nil, nil, fmt.Errorf("secret name set to %v but no cloud was specified. Please set cloud_name in your machine spec", secretName)
 	}
 
 	secret := &corev1.Secret{}
@@ -318,26 +368,54 @@ func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNam
 		Name:      secretName,
 	}, secret)
 	if err != nil {
-		return emptyCloud, nil, err
+		return emptyCloud, nil, nil, err
 	}
 
 	content, ok := secret.Data[CloudsSecretKey]
 	if !ok {
-		return emptyCloud, nil, fmt.Errorf("OpenStack credentials secret %v did not contain key %v",
+		return emptyCloud, nil, nil, fmt.Errorf("OpenStack credentials secret %v did not contain key %v",
 			secretName, CloudsSecretKey)
 	}
 	var clouds clientconfig.Clouds
 	if err = yaml.Unmarshal(content, &clouds); err != nil {
-		return emptyCloud, nil, fmt.Errorf("failed to unmarshal clouds credentials stored in secret %v: %v", secretName, err)
+		return emptyCloud, nil, nil, fmt.Errorf("failed to unmarshal clouds credentials stored in secret %v: %v", secretName, err)
+	}
+
+	// Parse optional endpoint overrides.
+	var endpointOverrides *EndpointOverrides
+	if endpointsData, hasEndpoints := secret.Data[EndpointsSecretKey]; hasEndpoints {
+		logger.V(4).Info("Loading endpoint overrides from secret", "secret", secretName, "namespace", secretNamespace, "key", EndpointsSecretKey)
+		var overrides EndpointOverrides
+		if err = yaml.Unmarshal(endpointsData, &overrides); err != nil {
+			return emptyCloud, nil, nil, fmt.Errorf("failed to unmarshal endpoint overrides stored in secret %v (key %v): %v", secretName, EndpointsSecretKey, err)
+		}
+		for cloud, byRegion := range overrides.Clouds {
+			for region, byService := range byRegion {
+				for service, url := range byService {
+					logger.V(4).Info("Endpoint override loaded", "cloud", cloud, "region", region, "service", service, "url", url)
+				}
+			}
+		}
+		logger.V(4).Info("Endpoint overrides secret loaded", "secret", secretName, "namespace", secretNamespace)
+		endpointOverrides = &overrides
 	}
 
 	// get caCert
 	caCert, ok := secret.Data[CASecretKey]
+
+	// clouds.Clouds[cloudName] returns a Cloud struct whose Cloud field is not
+	// automatically populated from the YAML map key.  Populate it explicitly so
+	// that endpoint-override lookups (which key on cloud.Cloud) work correctly
+	// with standard clouds.yaml files that do not include an explicit
+	// "cloud: <name>" line inside each cloud entry.
+	cloud := clouds.Clouds[cloudName]
+	cloud.Cloud = cloudName
+
 	if !ok {
-		return clouds.Clouds[cloudName], nil, nil
+		return cloud, nil, endpointOverrides, nil
 	}
 
-	return clouds.Clouds[cloudName], caCert, nil
+	return cloud, caCert, endpointOverrides, nil
 }
 
 // getProjectIDFromAuthResult handles different auth mechanisms to retrieve the

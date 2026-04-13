@@ -117,6 +117,8 @@ func TestService_getImageID(t *testing.T) {
 				m.ListImages(images.ListOpts{Name: imageName}).Return(
 					[]images.Image{},
 					nil)
+				// logAvailableImages makes a second unfiltered call for debugging.
+				m.ListImages(nil).Return([]images.Image{}, nil)
 			},
 			want:    nil,
 			wantErr: true,

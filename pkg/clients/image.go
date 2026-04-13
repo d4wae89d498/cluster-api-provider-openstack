@@ -18,7 +18,6 @@ package clients
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -44,16 +43,18 @@ type ImageClient interface {
 type imageClient struct{ client *gophercloud.ServiceClient }
 
 // NewImageClient returns a new glance client.
-func NewImageClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts) (ImageClient, error) {
-	images, err := openstack.NewImageV2(providerClient, gophercloud.EndpointOpts{
+// An optional endpointURL may be provided to override the service catalog endpoint.
+func NewImageClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ImageClient, error) {
+	imagesSC, err := openstack.NewImageV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
+	imagesSC, err = ApplyEndpointOverride(imagesSC, err, providerClient, endpointURL, "Image")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create image service client: %v", err)
+		return nil, err
 	}
 
-	return imageClient{images}, nil
+	return imageClient{imagesSC}, nil
 }
 
 func (c imageClient) ListImages(listOpts images.ListOptsBuilder) ([]images.Image, error) {

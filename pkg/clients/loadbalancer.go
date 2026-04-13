@@ -84,7 +84,12 @@ func NewLbClient(providerClient *gophercloud.ProviderClient, providerClientOpts 
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create load balancer service client: %v", err)
 	} else if endpointURL != "" {
+		// Override both Endpoint and ResourceBase.  NewLoadBalancerV2
+		// sets ResourceBase to Endpoint+"v2.0/", so if we only
+		// override Endpoint the actual API calls still use the old
+		// catalog URL via ResourceBase.
 		loadbalancerClient.Endpoint = endpointURL
+		loadbalancerClient.ResourceBase = ""
 	}
 
 	return &lbClient{loadbalancerClient}, nil

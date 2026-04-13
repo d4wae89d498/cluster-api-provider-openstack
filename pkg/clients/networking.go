@@ -115,7 +115,13 @@ func NewNetworkClient(providerClient *gophercloud.ProviderClient, providerClient
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create networking service providerClient: %v", err)
 	} else if endpointURL != "" {
+		// Override both Endpoint and ResourceBase.  NewNetworkV2 sets
+		// ResourceBase to Endpoint+"v2.0/", so if we only override
+		// Endpoint the actual API calls still use the old catalog URL
+		// via ResourceBase.  Clearing ResourceBase forces
+		// ResourceBaseURL() to fall back to the new Endpoint.
 		serviceClient.Endpoint = endpointURL
+		serviceClient.ResourceBase = ""
 	}
 
 	return networkClient{serviceClient}, nil

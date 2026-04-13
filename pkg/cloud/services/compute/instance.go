@@ -430,6 +430,7 @@ func (s *Service) getImageIDByReference(ctx context.Context, k8sClient client.Cl
 // TODO: needs a breaking CRD change so it works like images.
 func (s *Service) GetFlavorID(flavorID, flavorName *string) (string, error) {
 	if flavorID != nil {
+		s.scope.Logger().V(0).Info("Resolving flavor by ID", "flavorID", *flavorID)
 		return *flavorID, nil
 	}
 
@@ -437,17 +438,25 @@ func (s *Service) GetFlavorID(flavorID, flavorName *string) (string, error) {
 		return "", fmt.Errorf("no flavors were found: no name set")
 	}
 
+	s.scope.Logger().V(0).Info("Resolving flavor by name", "flavorName", *flavorName)
+
 	allFlavors, err := s.getComputeClient().ListFlavors()
 	if err != nil {
 		return "", err
 	}
 
+	s.scope.Logger().V(0).Info("Flavor list retrieved", "count", len(allFlavors))
+
+	flavorNames := make([]string, 0, len(allFlavors))
 	for _, flavor := range allFlavors {
+		flavorNames = append(flavorNames, flavor.Name)
 		if flavor.Name == *flavorName {
+			s.scope.Logger().V(0).Info("Flavor resolved", "flavorName", *flavorName, "flavorID", flavor.ID)
 			return flavor.ID, nil
 		}
 	}
 
+	s.scope.Logger().V(0).Info("Flavor not found in list", "requestedName", *flavorName, "availableFlavors", flavorNames)
 	return "", fmt.Errorf("no flavors were found: name=%v", *flavorName)
 }
 

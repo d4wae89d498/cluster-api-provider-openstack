@@ -61,7 +61,13 @@ func NewImageClient(providerClient *gophercloud.ProviderClient, providerClientOp
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create image service client: %v", err)
 	} else if endpointURL != "" {
+		// Override both Endpoint and ResourceBase.  NewImageV2 sets
+		// ResourceBase to Endpoint+"v2/", so if we only override
+		// Endpoint the actual API calls still use the old catalog URL
+		// via ResourceBase.  Clearing ResourceBase forces
+		// ResourceBaseURL() to fall back to the new Endpoint.
 		images.Endpoint = endpointURL
+		images.ResourceBase = ""
 	}
 
 	return imageClient{images}, nil

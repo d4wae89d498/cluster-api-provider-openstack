@@ -20,11 +20,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"github.com/go-logr/logr"
 )
 
 const (
@@ -253,5 +254,46 @@ func TestGetCloudFromSecret_InvalidEndpointOverrides(t *testing.T) {
 	_, _, _, err := getCloudFromSecret(ctx, c, testNamespace, secretName, testCloudName, logr.Discard()) //nolint:dogsled
 	if err == nil {
 		t.Fatalf("expected error for invalid endpoints.yaml, got nil")
+	}
+}
+
+// TestGetScopeCacheKey_DiffersWithAndWithoutOverrides ensures that a scope with
+// endpoint overrides and one without produce different cache keys.  This
+// prevents a cached scope (created before endpoints.yaml was added) from being
+// returned in place of a scope that should apply the overrides.
+func TestGetScopeCacheKey_DiffersWithAndWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	cloud := testClientconfigCloud()
+
+	keyNoOverrides, err := getScopeCacheKey(cloud, nil)
+	if err != nil {
+		t.Fatalf("getScopeCacheKey (no overrides): %v", err)
+	}
+
+	overrides := &EndpointOverrides{
+		Clouds: map[string]map[string]map[string]string{
+			testCloudName: {
+				testRegion: {
+					"compute": "https://nova-custom.example.com/v2.1/",
+				},
+			},
+		},
+	}
+	keyWithOverrides, err := getScopeCacheKey(cloud, overrides)
+	if err != nil {
+		t.Fatalf("getScopeCacheKey (with overrides): %v", err)
+	}
+
+	if keyNoOverrides == keyWithOverrides {
+		t.Errorf("cache keys should differ when endpoint overrides are present, but both are %q", keyNoOverrides)
+	}
+}
+
+// testClientconfigCloud returns a minimal clientconfig.Cloud for use in tests.
+func testClientconfigCloud() clientconfig.Cloud {
+	return clientconfig.Cloud{
+		Cloud:      testCloudName,
+		RegionName: testRegion,
 	}
 }

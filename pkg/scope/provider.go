@@ -136,13 +136,28 @@ func (f *providerScopeFactory) NewClientScopeFromObject(ctx context.Context, ctr
 	return NewCachedProviderScope(f.clientCache, cloud, identityRef.Region, caCert, endpointOverrides, logger)
 }
 
-func getScopeCacheKey(cloud clientconfig.Cloud) (string, error) {
-	key, err := computeSpewHash(cloud)
+// getScopeCacheKey returns a cache key that uniquely identifies a provider
+// scope.  It hashes both the cloud configuration and the endpoint overrides so
+// that changing endpoints.yaml always produces a new scope (and the cached
+// scope is not returned with stale — or absent — endpoint overrides).
+func getScopeCacheKey(cloud clientconfig.Cloud, endpointOverrides *EndpointOverrides) (string, error) {
+	cloudKey, err := computeSpewHash(cloud)
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("%d", key), nil
+	// Hash the overrides separately; a nil pointer and an empty struct must
+	// produce the same key, so normalise to a concrete value first.
+	var overrideVal EndpointOverrides
+	if endpointOverrides != nil {
+		overrideVal = *endpointOverrides
+	}
+	overrideKey, err := computeSpewHash(overrideVal)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%d-%d", cloudKey, overrideKey), nil
 }
 
 type providerScope struct {
@@ -152,6 +167,7 @@ type providerScope struct {
 	endpointOverrides  *EndpointOverrides
 	cloudName          string
 	regionName         string
+	logger             logr.Logger
 }
 
 func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte, endpointOverrides *EndpointOverrides, logger logr.Logger) (Scope, error) {
@@ -166,6 +182,13 @@ func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte
 		effectiveRegion = cloud.RegionName
 	}
 
+	hasOverrides := endpointOverrides != nil && len(endpointOverrides.Clouds) > 0
+	logger.V(4).Info("Creating provider scope",
+		"cloudName", cloud.Cloud,
+		"regionName", effectiveRegion,
+		"endpointOverridesPresent", hasOverrides,
+	)
+
 	return &providerScope{
 		providerClient:     providerClient,
 		providerClientOpts: clientOpts,
@@ -173,17 +196,20 @@ func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte
 		endpointOverrides:  endpointOverrides,
 		cloudName:          cloud.Cloud,
 		regionName:         effectiveRegion,
+		logger:             logger,
 	}, nil
 }
 
 func NewCachedProviderScope(cache *cache.LRUExpireCache, cloud clientconfig.Cloud, regionName string, caCert []byte, endpointOverrides *EndpointOverrides, logger logr.Logger) (Scope, error) {
-	key, err := getScopeCacheKey(cloud)
+	// The cache key covers both the cloud credentials AND the endpoint overrides
+	// so that adding/changing endpoints.yaml invalidates the cached scope.
+	key, err := getScopeCacheKey(cloud, endpointOverrides)
 	if err != nil {
 		return nil, fmt.Errorf("compute cloud config cache key: %w", err)
 	}
 
 	if scope, found := cache.Get(key); found {
-		logger.V(5).Info("Using scope from cache")
+		logger.V(4).Info("Using scope from cache", "cacheKey", key)
 		return scope.(Scope), nil
 	}
 
@@ -209,23 +235,53 @@ func (s *providerScope) ProjectID() string {
 }
 
 func (s *providerScope) NewComputeClient() (clients.ComputeClient, error) {
-	return clients.NewComputeClient(s.providerClient, s.providerClientOpts, s.endpointOverrides.GetEndpoint("compute", s.cloudName, s.regionName))
+	endpointURL := s.endpointOverrides.GetEndpoint("compute", s.cloudName, s.regionName)
+	s.logger.V(4).Info("Resolving compute endpoint",
+		"cloudName", s.cloudName,
+		"regionName", s.regionName,
+		"endpointOverrideURL", endpointURL,
+	)
+	return clients.NewComputeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewNetworkClient() (clients.NetworkClient, error) {
-	return clients.NewNetworkClient(s.providerClient, s.providerClientOpts, s.endpointOverrides.GetEndpoint("network", s.cloudName, s.regionName))
+	endpointURL := s.endpointOverrides.GetEndpoint("network", s.cloudName, s.regionName)
+	s.logger.V(4).Info("Resolving network endpoint",
+		"cloudName", s.cloudName,
+		"regionName", s.regionName,
+		"endpointOverrideURL", endpointURL,
+	)
+	return clients.NewNetworkClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewVolumeClient() (clients.VolumeClient, error) {
-	return clients.NewVolumeClient(s.providerClient, s.providerClientOpts, s.endpointOverrides.GetEndpoint("volume", s.cloudName, s.regionName))
+	endpointURL := s.endpointOverrides.GetEndpoint("volume", s.cloudName, s.regionName)
+	s.logger.V(4).Info("Resolving volume endpoint",
+		"cloudName", s.cloudName,
+		"regionName", s.regionName,
+		"endpointOverrideURL", endpointURL,
+	)
+	return clients.NewVolumeClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewImageClient() (clients.ImageClient, error) {
-	return clients.NewImageClient(s.providerClient, s.providerClientOpts, s.endpointOverrides.GetEndpoint("image", s.cloudName, s.regionName))
+	endpointURL := s.endpointOverrides.GetEndpoint("image", s.cloudName, s.regionName)
+	s.logger.V(4).Info("Resolving image endpoint",
+		"cloudName", s.cloudName,
+		"regionName", s.regionName,
+		"endpointOverrideURL", endpointURL,
+	)
+	return clients.NewImageClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) NewLbClient() (clients.LbClient, error) {
-	return clients.NewLbClient(s.providerClient, s.providerClientOpts, s.endpointOverrides.GetEndpoint("loadbalancer", s.cloudName, s.regionName))
+	endpointURL := s.endpointOverrides.GetEndpoint("loadbalancer", s.cloudName, s.regionName)
+	s.logger.V(4).Info("Resolving loadbalancer endpoint",
+		"cloudName", s.cloudName,
+		"regionName", s.regionName,
+		"endpointOverrideURL", endpointURL,
+	)
+	return clients.NewLbClient(s.providerClient, s.providerClientOpts, endpointURL)
 }
 
 func (s *providerScope) ExtractToken() (*tokens.Token, error) {

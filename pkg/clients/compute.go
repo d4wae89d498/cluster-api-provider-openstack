@@ -83,17 +83,24 @@ type computeClient struct {
 // NewComputeClient returns a new compute client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
 // If provided, it must end with a trailing slash ('/').
+// When an endpointURL is provided and the service catalog lookup fails, the
+// client is created directly with the override URL, bypassing the catalog.
 func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (ComputeClient, error) {
 	compute, err := openstack.NewComputeV2(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil {
+	if err != nil && endpointURL != "" {
+		// Service catalog lookup failed, but we have an explicit endpoint
+		// override — create the service client manually.
+		compute = &gophercloud.ServiceClient{
+			ProviderClient: providerClient,
+			Endpoint:       endpointURL,
+		}
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to create compute service client: %v", err)
-	}
-
-	// Override the endpoint URL if a custom one was specified.
-	if endpointURL != "" {
+	} else if endpointURL != "" {
+		// Catalog succeeded; override the endpoint.
 		compute.Endpoint = endpointURL
 	}
 

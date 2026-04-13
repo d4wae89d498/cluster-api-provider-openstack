@@ -55,6 +55,15 @@ type EndpointOverrides struct {
 // GetEndpoint returns the custom endpoint URL for the given service, cloud name,
 // and region name.  It returns an empty string when no override is configured
 // for the requested combination.
+//
+// Region matching order:
+//  1. Exact match on regionName
+//  2. Wildcard: empty string "" (matches any region)
+//  3. Default: if only one region is configured for the cloud, use it
+//
+// This allows endpoints.yaml to work even when the effective region
+// (from identityRef or clouds.yaml) does not exactly match the key
+// in endpoints.yaml, which is the most common misconfiguration.
 func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) string {
 	if e == nil {
 		return ""
@@ -63,9 +72,48 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	if !ok {
 		return ""
 	}
-	byService, ok := byRegion[regionName]
-	if !ok {
-		return ""
+
+	// 1. Exact match on region
+	if byService, ok := byRegion[regionName]; ok {
+		if url := byService[service]; url != "" {
+			return url
+		}
 	}
-	return byService[service]
+
+	// 2. Wildcard: empty-string region acts as a catch-all default
+	if regionName != "" {
+		if byService, ok := byRegion[""]; ok {
+			if url := byService[service]; url != "" {
+				return url
+			}
+		}
+	}
+
+	// 3. If only one region is configured, use it as the default
+	if len(byRegion) == 1 {
+		for _, byService := range byRegion {
+			if url := byService[service]; url != "" {
+				return url
+			}
+		}
+	}
+
+	return ""
+}
+
+// AvailableRegions returns the region keys configured for a given cloud,
+// or nil if the cloud is not found.  Used for diagnostic logging.
+func (e *EndpointOverrides) AvailableRegions(cloudName string) []string {
+	if e == nil {
+		return nil
+	}
+	byRegion, ok := e.Clouds[cloudName]
+	if !ok {
+		return nil
+	}
+	regions := make([]string, 0, len(byRegion))
+	for r := range byRegion {
+		regions = append(regions, r)
+	}
+	return regions
 }

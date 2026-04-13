@@ -40,17 +40,21 @@ type volumeClient struct{ client *gophercloud.ServiceClient }
 // NewVolumeClient returns a new cinder client.
 // An optional endpointURL may be provided to override the service catalog endpoint.
 // If provided, it must end with a trailing slash ('/').
+// When an endpointURL is provided and the service catalog lookup fails, the
+// client is created directly with the override URL, bypassing the catalog.
 func NewVolumeClient(providerClient *gophercloud.ProviderClient, providerClientOpts *clientconfig.ClientOpts, endpointURL string) (VolumeClient, error) {
 	volume, err := openstack.NewBlockStorageV3(providerClient, gophercloud.EndpointOpts{
 		Region:       providerClientOpts.RegionName,
 		Availability: clientconfig.GetEndpointType(providerClientOpts.EndpointType),
 	})
-	if err != nil {
+	if err != nil && endpointURL != "" {
+		volume = &gophercloud.ServiceClient{
+			ProviderClient: providerClient,
+			Endpoint:       endpointURL,
+		}
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to create volume service client: %v", err)
-	}
-
-	// Override the endpoint URL if a custom one was specified.
-	if endpointURL != "" {
+	} else if endpointURL != "" {
 		volume.Endpoint = endpointURL
 	}
 

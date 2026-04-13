@@ -183,13 +183,13 @@ func NewProviderScope(cloud clientconfig.Cloud, regionName string, caCert []byte
 	}
 
 	hasOverrides := endpointOverrides != nil && len(endpointOverrides.Clouds) > 0
-	logger.V(0).Info("Creating provider scope",
+	logger.V(4).Info("Creating provider scope",
 		"cloudName", cloud.Cloud,
 		"regionName", effectiveRegion,
 		"endpointOverridesPresent", hasOverrides,
 	)
 	if hasOverrides {
-		logger.V(0).Info("Endpoint overrides: available regions for cloud",
+		logger.V(4).Info("Endpoint overrides: available regions for cloud",
 			"cloudName", cloud.Cloud,
 			"availableRegions", endpointOverrides.AvailableRegions(cloud.Cloud),
 		)
@@ -215,7 +215,7 @@ func NewCachedProviderScope(cache *cache.LRUExpireCache, cloud clientconfig.Clou
 	}
 
 	if scope, found := cache.Get(key); found {
-		logger.V(0).Info("Using scope from cache", "cacheKey", key)
+		logger.V(4).Info("Using scope from cache", "cacheKey", key)
 		return scope.(Scope), nil
 	}
 
@@ -242,7 +242,7 @@ func (s *providerScope) ProjectID() string {
 
 func (s *providerScope) NewComputeClient() (clients.ComputeClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("compute", s.cloudName, s.regionName)
-	s.logger.V(0).Info("Resolving compute endpoint",
+	s.logger.V(4).Info("Resolving compute endpoint",
 		"cloudName", s.cloudName,
 		"regionName", s.regionName,
 		"endpointOverrideURL", endpointURL,
@@ -253,7 +253,7 @@ func (s *providerScope) NewComputeClient() (clients.ComputeClient, error) {
 
 func (s *providerScope) NewNetworkClient() (clients.NetworkClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("network", s.cloudName, s.regionName)
-	s.logger.V(0).Info("Resolving network endpoint",
+	s.logger.V(4).Info("Resolving network endpoint",
 		"cloudName", s.cloudName,
 		"regionName", s.regionName,
 		"endpointOverrideURL", endpointURL,
@@ -264,7 +264,7 @@ func (s *providerScope) NewNetworkClient() (clients.NetworkClient, error) {
 
 func (s *providerScope) NewVolumeClient() (clients.VolumeClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("volume", s.cloudName, s.regionName)
-	s.logger.V(0).Info("Resolving volume endpoint",
+	s.logger.V(4).Info("Resolving volume endpoint",
 		"cloudName", s.cloudName,
 		"regionName", s.regionName,
 		"endpointOverrideURL", endpointURL,
@@ -275,7 +275,7 @@ func (s *providerScope) NewVolumeClient() (clients.VolumeClient, error) {
 
 func (s *providerScope) NewImageClient() (clients.ImageClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("image", s.cloudName, s.regionName)
-	s.logger.V(0).Info("Resolving image endpoint",
+	s.logger.V(4).Info("Resolving image endpoint",
 		"cloudName", s.cloudName,
 		"regionName", s.regionName,
 		"endpointOverrideURL", endpointURL,
@@ -286,7 +286,7 @@ func (s *providerScope) NewImageClient() (clients.ImageClient, error) {
 
 func (s *providerScope) NewLbClient() (clients.LbClient, error) {
 	endpointURL := s.endpointOverrides.GetEndpoint("loadbalancer", s.cloudName, s.regionName)
-	s.logger.V(0).Info("Resolving loadbalancer endpoint",
+	s.logger.V(4).Info("Resolving loadbalancer endpoint",
 		"cloudName", s.cloudName,
 		"regionName", s.regionName,
 		"endpointOverrideURL", endpointURL,
@@ -414,7 +414,7 @@ func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNam
 	// Parse optional endpoint overrides.
 	var endpointOverrides *EndpointOverrides
 	if endpointsData, hasEndpoints := secret.Data[EndpointsSecretKey]; hasEndpoints {
-		logger.V(0).Info("Loading endpoint overrides from secret", "secret", secretName, "namespace", secretNamespace, "key", EndpointsSecretKey)
+		logger.V(4).Info("Loading endpoint overrides from secret", "secret", secretName, "namespace", secretNamespace, "key", EndpointsSecretKey)
 		var overrides EndpointOverrides
 		if err = yaml.Unmarshal(endpointsData, &overrides); err != nil {
 			return emptyCloud, nil, nil, fmt.Errorf("failed to unmarshal endpoint overrides stored in secret %v (key %v): %v", secretName, EndpointsSecretKey, err)
@@ -422,11 +422,11 @@ func getCloudFromSecret(ctx context.Context, ctrlClient client.Client, secretNam
 		for cloud, byRegion := range overrides.Clouds {
 			for region, byService := range byRegion {
 				for service, url := range byService {
-					logger.V(0).Info("Endpoint override loaded", "cloud", cloud, "region", region, "service", service, "url", url)
+					logger.V(4).Info("Endpoint override loaded", "cloud", cloud, "region", region, "service", service, "url", url)
 				}
 			}
 		}
-		logger.V(0).Info("Endpoint overrides secret loaded", "secret", secretName, "namespace", secretNamespace)
+		logger.V(4).Info("Endpoint overrides secret loaded", "secret", secretName, "namespace", secretNamespace)
 		endpointOverrides = &overrides
 	}
 

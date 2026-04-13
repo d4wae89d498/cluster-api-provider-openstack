@@ -98,18 +98,18 @@ func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClient
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
 		}
-		klog.V(0).Infof("NewComputeClient: catalog failed, using override endpoint=%q", endpointURL)
+		klog.V(4).Infof("NewComputeClient: catalog failed, using override endpoint=%q", endpointURL)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create compute service client: %v", err)
 	} else if endpointURL != "" {
-		klog.V(0).Infof("NewComputeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
+		klog.V(4).Infof("NewComputeClient: catalog endpoint=%q resourceBase=%q, overriding with=%q",
 			compute.Endpoint, compute.ResourceBase, endpointURL)
 		// Catalog succeeded; override the endpoint.
 		// Also clear ResourceBase so ResourceBaseURL() falls back to the new Endpoint.
 		compute.Endpoint = endpointURL
 		compute.ResourceBase = ""
 	} else {
-		klog.V(0).Infof("NewComputeClient: using catalog endpoint=%q resourceBase=%q",
+		klog.V(4).Infof("NewComputeClient: using catalog endpoint=%q resourceBase=%q",
 			compute.Endpoint, compute.ResourceBase)
 	}
 
@@ -119,7 +119,7 @@ func NewComputeClient(providerClient *gophercloud.ProviderClient, providerClient
 		return nil, fmt.Errorf("unable to verify compatible server version: %w", err)
 	}
 
-	klog.V(0).Infof("NewComputeClient: server microversions min=%q max=%q, CAPO requires=%q",
+	klog.V(4).Infof("NewComputeClient: server microversions min=%q max=%q, CAPO requires=%q",
 		serviceMin, serviceMax, MinimumNovaMicroversion)
 
 	supported, err := openstackutil.MicroversionSupported(MinimumNovaMicroversion, serviceMin, serviceMax)
@@ -147,7 +147,7 @@ func (c computeClient) ListAvailabilityZones() ([]availabilityzones.Availability
 
 func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 	flavorListURL := c.client.ServiceURL("flavors", "detail")
-	klog.V(0).Infof("ListFlavors: endpoint=%q resourceBase=%q flavorListURL=%q microversion=%q",
+	klog.V(4).Infof("ListFlavors: endpoint=%q resourceBase=%q flavorListURL=%q microversion=%q",
 		c.client.Endpoint, c.client.ResourceBase, flavorListURL, c.client.Microversion)
 
 	// Strategy 1: list without any is_public filter (server default).
@@ -158,13 +158,13 @@ func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 		return nil, err
 	}
 	if len(result) > 0 {
-		klog.V(0).Infof("ListFlavors: strategy=default returned %d flavor(s)", len(result))
+		klog.V(4).Infof("ListFlavors: strategy=default returned %d flavor(s)", len(result))
 		return result, nil
 	}
 
 	// Strategy 2: explicitly request is_public=true (PublicAccess).
 	// On some deployments this behaves differently from the default.
-	klog.V(0).Info("ListFlavors: default filter returned 0 flavors, retrying with is_public=true")
+	klog.V(4).Info("ListFlavors: default filter returned 0 flavors, retrying with is_public=true")
 	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
 		AccessType: flavors.PublicAccess,
 	})
@@ -172,23 +172,23 @@ func (c computeClient) ListFlavors() ([]flavors.Flavor, error) {
 		return nil, err
 	}
 	if len(result) > 0 {
-		klog.V(0).Infof("ListFlavors: strategy=PublicAccess returned %d flavor(s)", len(result))
+		klog.V(4).Infof("ListFlavors: strategy=PublicAccess returned %d flavor(s)", len(result))
 		return result, nil
 	}
 
 	// Strategy 3: try AllAccess (is_public=None) which is admin-only but
 	// may work if the service account has the admin role.
-	klog.V(0).Info("ListFlavors: PublicAccess returned 0 flavors, retrying with is_public=None (admin)")
+	klog.V(4).Info("ListFlavors: PublicAccess returned 0 flavors, retrying with is_public=None (admin)")
 	result, err = c.listFlavorsWithOpts(&flavors.ListOpts{
 		AccessType: flavors.AllAccess,
 	})
 	if err != nil {
-		klog.V(0).Infof("ListFlavors: AllAccess failed (likely non-admin): %v", err)
+		klog.V(4).Infof("ListFlavors: AllAccess failed (likely non-admin): %v", err)
 		// Not fatal — return the empty list from the previous strategy.
 		return []flavors.Flavor{}, nil
 	}
 
-	klog.V(0).Infof("ListFlavors: strategy=AllAccess returned %d flavor(s)", len(result))
+	klog.V(4).Infof("ListFlavors: strategy=AllAccess returned %d flavor(s)", len(result))
 	return result, nil
 }
 

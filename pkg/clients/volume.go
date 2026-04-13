@@ -55,7 +55,11 @@ func NewVolumeClient(providerClient *gophercloud.ProviderClient, providerClientO
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to create volume service client: %v", err)
 	} else if endpointURL != "" {
+		// Override both Endpoint and ResourceBase for safety.
+		// NewBlockStorageV3 does not currently set ResourceBase, but
+		// clearing it ensures forward-compatibility if that changes.
 		volume.Endpoint = endpointURL
+		volume.ResourceBase = ""
 	}
 
 	return &volumeClient{volume}, nil

@@ -223,3 +223,44 @@ func TestEndpointOverrides_GetEndpoint_TrailingSlash(t *testing.T) {
 		t.Errorf("URL with existing trailing slash was modified: got %q", got)
 	}
 }
+
+// TestEndpointOverrides_GetEndpoint_CaseInsensitiveService verifies that
+// service key lookup is case-insensitive so that users can write "Image",
+// "Compute", etc. in their endpoints.yaml.
+func TestEndpointOverrides_GetEndpoint_CaseInsensitiveService(t *testing.T) {
+	t.Parallel()
+
+	overrides := &EndpointOverrides{
+		Clouds: map[string]map[string]map[string]string{
+			"mycloud": {
+				"RegionOne": {
+					"Image":        "https://glance-upper.example.com/v2/",
+					"compute":      "https://nova.example.com/v2.1/",
+					"LoadBalancer": "https://octavia-mixed.example.com/v2.0/",
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name    string
+		service string
+		want    string
+	}{
+		// Lookup with lowercase key, config has mixed case
+		{"lowercase image finds uppercase Image", "image", "https://glance-upper.example.com/v2/"},
+		{"lowercase compute finds lowercase compute", "compute", "https://nova.example.com/v2.1/"},
+		{"lowercase loadbalancer finds mixed LoadBalancer", "loadbalancer", "https://octavia-mixed.example.com/v2.0/"},
+		// Lookup with uppercase key, config has lowercase
+		{"uppercase COMPUTE finds lowercase compute", "COMPUTE", "https://nova.example.com/v2.1/"},
+		// Service not configured at all
+		{"unconfigured volume", "volume", ""},
+	}
+
+	for _, tc := range cases {
+		got := overrides.GetEndpoint(tc.service, "mycloud", "RegionOne")
+		if got != tc.want {
+			t.Errorf("%s: GetEndpoint(%q, mycloud, RegionOne) = %q, want %q", tc.name, tc.service, got, tc.want)
+		}
+	}
+}

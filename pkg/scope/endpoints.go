@@ -16,7 +16,11 @@ limitations under the License.
 
 package scope
 
-import "strings"
+import (
+	"strings"
+
+	"k8s.io/klog/v2"
+)
 
 // EndpointsSecretKey is the key in the credentials secret that optionally contains
 // per-service endpoint overrides.  The value must be a YAML-encoded EndpointOverrides.
@@ -72,12 +76,18 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	}
 	byRegion, ok := e.Clouds[cloudName]
 	if !ok {
+		klog.V(4).Infof("GetEndpoint: no overrides for cloud=%q (available clouds: %v)", cloudName, e.availableClouds())
 		return ""
 	}
 
+	// Normalise service key to lowercase so that users can write "Image",
+	// "Compute", etc. in endpoints.yaml without problems.
+	serviceLower := strings.ToLower(service)
+
 	// 1. Exact match on region
 	if byService, ok := byRegion[regionName]; ok {
-		if url := byService[service]; url != "" {
+		if url := lookupServiceCaseInsensitive(byService, serviceLower); url != "" {
+			klog.V(2).Infof("GetEndpoint: cloud=%q region=%q service=%q → %q", cloudName, regionName, service, url)
 			return ensureTrailingSlash(url)
 		}
 	}
@@ -85,7 +95,8 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 	// 2. Wildcard: empty-string region acts as a catch-all default
 	if regionName != "" {
 		if byService, ok := byRegion[""]; ok {
-			if url := byService[service]; url != "" {
+			if url := lookupServiceCaseInsensitive(byService, serviceLower); url != "" {
+				klog.V(2).Infof("GetEndpoint: cloud=%q region=%q (wildcard match) service=%q → %q", cloudName, regionName, service, url)
 				return ensureTrailingSlash(url)
 			}
 		}
@@ -93,14 +104,45 @@ func (e *EndpointOverrides) GetEndpoint(service, cloudName, regionName string) s
 
 	// 3. If only one region is configured, use it as the default
 	if len(byRegion) == 1 {
-		for _, byService := range byRegion {
-			if url := byService[service]; url != "" {
+		for singleRegion, byService := range byRegion {
+			if url := lookupServiceCaseInsensitive(byService, serviceLower); url != "" {
+				klog.V(2).Infof("GetEndpoint: cloud=%q region=%q (single-region fallback from %q) service=%q → %q",
+					cloudName, regionName, singleRegion, service, url)
 				return ensureTrailingSlash(url)
 			}
 		}
 	}
 
+	klog.V(4).Infof("GetEndpoint: no override for cloud=%q region=%q service=%q", cloudName, regionName, service)
 	return ""
+}
+
+// lookupServiceCaseInsensitive looks up a service key case-insensitively from
+// the byService map.  The caller must pass serviceLower already lowercased.
+func lookupServiceCaseInsensitive(byService map[string]string, serviceLower string) string {
+	// Fast path: try exact (lowercase) key first.
+	if url, ok := byService[serviceLower]; ok {
+		return url
+	}
+	// Slow path: case-insensitive scan for user convenience.
+	for k, url := range byService {
+		if strings.EqualFold(k, serviceLower) {
+			return url
+		}
+	}
+	return ""
+}
+
+// availableClouds returns cloud names for diagnostic logging.
+func (e *EndpointOverrides) availableClouds() []string {
+	if e == nil {
+		return nil
+	}
+	clouds := make([]string, 0, len(e.Clouds))
+	for c := range e.Clouds {
+		clouds = append(clouds, c)
+	}
+	return clouds
 }
 
 // ensureTrailingSlash appends a "/" to the URL if it doesn't already end with one.

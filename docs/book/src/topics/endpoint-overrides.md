@@ -17,13 +17,16 @@ Keystone service catalog.
 
 ## Supported services
 
-| Key | OpenStack service |
-|---|---|
-| `compute` | Nova (instances, flavors, server groups, availability zones) |
-| `network` | Neutron (networks, subnets, ports, routers, security groups, floating IPs, trunks) |
-| `volume` | Cinder / Block Storage v3 (persistent volumes) |
-| `image` | Glance / Image v2 (machine images) |
-| `loadbalancer` | Octavia / Load Balancer v2 |
+| Key | OpenStack service | Typical version path |
+|---|---|---|
+| `compute` | Nova (instances, flavors, server groups, availability zones) | `/v2.1/` |
+| `network` | Neutron (networks, subnets, ports, routers, security groups, floating IPs, trunks) | `/v2.0/` |
+| `volume` | Cinder / Block Storage v3 (persistent volumes) | `/v3/` |
+| `image` | Glance / Image v2 (machine images) | `/v2/` |
+| `loadbalancer` | Octavia / Load Balancer v2 | `/v2.0/` |
+
+> **Note:** Service keys are **case-insensitive** — you can write `image`,
+> `Image`, or `IMAGE`.  However, lowercase is recommended by convention.
 
 ## Format
 
@@ -36,15 +39,33 @@ clouds:
 ```
 
 * `<cloudName>` – the cloud name as it appears in `clouds.yaml` (and in
-  `OpenStackIdentityReference.cloudName`).
-* `<regionName>` – the OpenStack region name.
-* `<service>` – one of `compute`, `network`, `volume`, `image`, `loadbalancer`.
-* `<url>` – the full base URL of the service endpoint.  **Must end with a
-  trailing slash (`/`).**
+  `OpenStackIdentityReference.cloudName`).  This **is** case-sensitive.
+* `<regionName>` – the OpenStack region name (case-sensitive).  Use an empty
+  string (`""`) as a catch-all wildcard that matches any region.
+* `<service>` – one of `compute`, `network`, `volume`, `image`, `loadbalancer`
+  (case-insensitive).
+* `<url>` – the full base URL of the service endpoint, including the version
+  path.  A trailing slash is added automatically if missing.
 
 Only the clouds, regions, and services that you need to override must be
 listed.  Any service without an entry will continue to use the URL discovered
 from the Keystone service catalog.
+
+## Understanding endpoint version paths
+
+Different OpenStack services use different version path prefixes.  When you look
+at the Keystone service catalog (`openstack catalog list`) you may see URLs like:
+
+| Service | Catalog URL example | Notes |
+|---|---|---|
+| compute (Nova) | `https://host:8774/v2.1/` | Ends with `/v2.1/` |
+| image (Glance) | `https://host:9292/` | Often just the port, **no** version path |
+| network (Neutron) | `https://host:9696/v2.0/` | Ends with `/v2.0/` |
+| volume (Cinder) | `https://host:8776/v3/` | Ends with `/v3/` |
+
+This is **normal** — each service exposes its own API version.  When overriding
+endpoints you must use the **full URL that Glance expects**, for example:
+`https://glance.example.com/v2/` (not just `https://glance.example.com/`).
 
 ## Full example
 
@@ -60,6 +81,17 @@ clouds:
       loadbalancer: https://octavia-internal.example.com/v2.0/
     RegionTwo:
       compute: https://nova-regiontwo.example.com/v2.1/
+```
+
+### Wildcard region (catch-all)
+
+If your overrides apply to all regions, use an empty-string key:
+
+```yaml
+clouds:
+  mycloud:
+    "":
+      image: https://glance-custom.example.com/v2/
 ```
 
 ## Adding the key to an existing Secret
@@ -95,3 +127,29 @@ When CAPO looks up an endpoint override it uses:
 
 Make sure the `<regionName>` key in `endpoints.yaml` matches exactly (it is
 case-sensitive).
+
+## Region fallback rules
+
+When looking up a service endpoint, CAPO tries these in order:
+
+1. **Exact match** on the region name.
+2. **Wildcard**: an empty-string `""` region key matches any region.
+3. **Single-region default**: if only one region is configured for the cloud,
+   it is used regardless of the requested region name.
+
+## Debugging
+
+To see endpoint override activity, run CAPO with verbosity level 2 or higher
+(`-v=2`).  This will log:
+
+* Which endpoint overrides were loaded from the secret.
+* Which override URL was selected for each service client.
+* When image lookup fails: the list of available images from the server.
+
+If you see "no images were found" errors, check that:
+
+1. Your image name is spelled exactly right (names are case-sensitive and
+   may contain spaces, e.g. `"Debian 13"`).
+2. The `image` endpoint override URL includes the correct version path
+   (e.g. `https://host:9292/v2/` — **not** just `https://host:9292/`).
+3. Your credentials have permission to list images.

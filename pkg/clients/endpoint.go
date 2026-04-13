@@ -37,7 +37,7 @@ import (
 func ApplyEndpointOverride(serviceClient *gophercloud.ServiceClient, catalogErr error, providerClient *gophercloud.ProviderClient, endpointURL, serviceName string) (*gophercloud.ServiceClient, error) {
 	if catalogErr != nil && endpointURL != "" {
 		// Catalog lookup failed, but an explicit override is available.
-		klog.V(4).Infof("New%sClient: catalog lookup failed, using override endpoint=%q", serviceName, endpointURL)
+		klog.V(2).Infof("New%sClient: catalog lookup failed, using override endpoint=%q", serviceName, endpointURL)
 		return &gophercloud.ServiceClient{
 			ProviderClient: providerClient,
 			Endpoint:       endpointURL,
@@ -49,7 +49,7 @@ func ApplyEndpointOverride(serviceClient *gophercloud.ServiceClient, catalogErr 
 	}
 
 	if endpointURL != "" {
-		klog.V(4).Infof("New%sClient: overriding catalog endpoint=%q resourceBase=%q with=%q",
+		klog.V(2).Infof("New%sClient: overriding catalog endpoint=%q resourceBase=%q with=%q",
 			serviceName, serviceClient.Endpoint, serviceClient.ResourceBase, endpointURL)
 		// Override both Endpoint and ResourceBase.  Several gophercloud
 		// New*() helpers set ResourceBase to Endpoint + version-path
